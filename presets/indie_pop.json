@@ -1,0 +1,73 @@
+{
+  "id": "indie_pop",
+  "name": "Indie Pop",
+  "description": "中頻與演唱輪廓、適量空間。",
+  "version": 1,
+  "target_lufs": -12.5,
+  "true_peak_db": -1.0,
+  "tonal_tilt_db": {
+    "low": 0.7,
+    "low_mid": -0.2,
+    "mid": 0.5,
+    "presence": 0.8,
+    "air": 0.7
+  },
+  "crest_target_db": 11.5,
+  "width": 1.1,
+  "reverb": {
+    "amount": 0.17,
+    "decay_s": 1.4,
+    "pre_delay_ms": 22,
+    "high_cut_hz": 8500
+  },
+  "compression": {
+    "drum": 0.3,
+    "bass": 0.25,
+    "vocal": 0.3,
+    "music": 0.2,
+    "bus": 0.15
+  },
+  "saturation": {
+    "drum": 0.08,
+    "bass": 0.08,
+    "vocal": 0.04,
+    "music": 0.06
+  },
+  "vocal_forward_db": 0.8,
+  "mono_below_hz": 100,
+  "role_gains_db": {
+    "kick": -2,
+    "snare": -2.5,
+    "hats": -7,
+    "toms": -3.5,
+    "cymbals": -8,
+    "drums_full": -2,
+    "bass": -3,
+    "sub_808": -2,
+    "lead_vocal": 0,
+    "backing_vocal": -6,
+    "guitar_electric": -3,
+    "guitar_acoustic": -3,
+    "keys": -4,
+    "piano": -4,
+    "synth": -5,
+    "pad": -7,
+    "strings": -6,
+    "brass": -6,
+    "fx": -10,
+    "other": -5
+  },
+  "guards": {
+    "max_eq_db": 6.0,
+    "max_gr_db": 6.0,
+    "min_crest_db": 7.0,
+    "max_width": 1.4,
+    "max_saturation": 0.5
+  },
+  "intent": {
+    "applicability": "適合吉他、鍵盤與人聲共同推進的編曲。",
+    "caveat": "名稱不代表藝術家的聲音；請依演出意圖與參考曲調整。",
+    "numeric_basis": "UTUVO自己調出來的起點數值，不是音質保證。",
+    "source_refs": []
+  }
+}

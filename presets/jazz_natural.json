@@ -1,0 +1,73 @@
+{
+  "id": "jazz_natural",
+  "name": "Jazz / Natural",
+  "description": "輕壓縮、自然動態。",
+  "version": 1,
+  "target_lufs": -16,
+  "true_peak_db": -1.0,
+  "tonal_tilt_db": {
+    "low": 0,
+    "low_mid": 0,
+    "mid": 0.2,
+    "presence": 0.2,
+    "air": 0.3
+  },
+  "crest_target_db": 14,
+  "width": 1,
+  "reverb": {
+    "amount": 0.1,
+    "decay_s": 1.2,
+    "pre_delay_ms": 12,
+    "high_cut_hz": 10000
+  },
+  "compression": {
+    "drum": 0.08,
+    "bass": 0.08,
+    "vocal": 0.12,
+    "music": 0.06,
+    "bus": 0.05
+  },
+  "saturation": {
+    "drum": 0,
+    "bass": 0,
+    "vocal": 0,
+    "music": 0
+  },
+  "vocal_forward_db": 0.2,
+  "mono_below_hz": 80,
+  "role_gains_db": {
+    "kick": -2.5,
+    "snare": -3,
+    "hats": -7,
+    "toms": -3.5,
+    "cymbals": -7,
+    "drums_full": -2.5,
+    "bass": -2.5,
+    "sub_808": -3,
+    "lead_vocal": 0,
+    "backing_vocal": -6,
+    "guitar_electric": -4,
+    "guitar_acoustic": -3,
+    "keys": -3,
+    "piano": -2.5,
+    "synth": -6,
+    "pad": -7,
+    "strings": -4,
+    "brass": -3,
+    "fx": -10,
+    "other": -3
+  },
+  "guards": {
+    "max_eq_db": 6.0,
+    "max_gr_db": 6.0,
+    "min_crest_db": 7.0,
+    "max_width": 1.4,
+    "max_saturation": 0.5
+  },
+  "intent": {
+    "applicability": "適合已錄好空間與動態的爵士、原聲分組。",
+    "caveat": "仍會使用既有逐軌處理與master鏈；不等於原樣直通或現場收音重建。",
+    "numeric_basis": "UTUVO自己調出來的起點數值，不是音質保證。",
+    "source_refs": []
+  }
+}

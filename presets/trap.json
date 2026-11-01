@@ -1,0 +1,67 @@
+{
+  "id": "trap",
+  "name": "Trap / Hip-Hop",
+  "description": "808 深、hats 脆、人聲貼。",
+  "version": 1,
+  "target_lufs": -9.5,
+  "true_peak_db": -1.0,
+  "tonal_tilt_db": {
+    "low": 2.5,
+    "low_mid": -0.8,
+    "mid": 0.0,
+    "presence": 1.5,
+    "air": 1.0
+  },
+  "crest_target_db": 10.0,
+  "width": 1.0,
+  "reverb": {
+    "amount": 0.12,
+    "decay_s": 0.9,
+    "pre_delay_ms": 15,
+    "high_cut_hz": 7500
+  },
+  "compression": {
+    "drum": 0.5,
+    "bass": 0.45,
+    "vocal": 0.6,
+    "music": 0.3,
+    "bus": 0.3
+  },
+  "saturation": {
+    "drum": 0.3,
+    "bass": 0.35,
+    "vocal": 0.15,
+    "music": 0.1
+  },
+  "vocal_forward_db": 2.0,
+  "mono_below_hz": 100,
+  "role_gains_db": {
+    "kick": -3.0,
+    "snare": -3.0,
+    "hats": -4.0,
+    "toms": -4.0,
+    "cymbals": -9.0,
+    "drums_full": -2.0,
+    "bass": -2.0,
+    "sub_808": 0.0,
+    "lead_vocal": 0.0,
+    "backing_vocal": -6.0,
+    "guitar_electric": -5.0,
+    "guitar_acoustic": -5.0,
+    "keys": -6.0,
+    "piano": -5.0,
+    "synth": -6.0,
+    "pad": -10.0,
+    "strings": -8.0,
+    "brass": -7.0,
+    "fx": -12.0,
+    "other": -10.0
+  },
+  "guards": {
+    "max_eq_db": 6.0,
+    "max_gr_db": 6.0,
+    "min_crest_db": 7.0,
+    "max_width": 1.4,
+    "max_saturation": 0.5
+  }
+}

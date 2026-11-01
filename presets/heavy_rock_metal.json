@@ -1,0 +1,73 @@
+{
+  "id": "heavy_rock_metal",
+  "name": "Heavy Rock / Metal",
+  "description": "吉他輪廓、密集聲部留定義。",
+  "version": 1,
+  "target_lufs": -10,
+  "true_peak_db": -1.0,
+  "tonal_tilt_db": {
+    "low": 0.5,
+    "low_mid": -1.2,
+    "mid": 0.3,
+    "presence": 0.7,
+    "air": 0.3
+  },
+  "crest_target_db": 9,
+  "width": 1.1,
+  "reverb": {
+    "amount": 0.1,
+    "decay_s": 1.1,
+    "pre_delay_ms": 18,
+    "high_cut_hz": 7500
+  },
+  "compression": {
+    "drum": 0.45,
+    "bass": 0.4,
+    "vocal": 0.4,
+    "music": 0.25,
+    "bus": 0.25
+  },
+  "saturation": {
+    "drum": 0.12,
+    "bass": 0.12,
+    "vocal": 0.05,
+    "music": 0.05
+  },
+  "vocal_forward_db": 1,
+  "mono_below_hz": 100,
+  "role_gains_db": {
+    "kick": -1.5,
+    "snare": -2,
+    "hats": -7,
+    "toms": -3,
+    "cymbals": -9,
+    "drums_full": -1.5,
+    "bass": -2,
+    "sub_808": -3,
+    "lead_vocal": 0,
+    "backing_vocal": -6,
+    "guitar_electric": -2.5,
+    "guitar_acoustic": -5,
+    "keys": -6,
+    "piano": -6,
+    "synth": -6,
+    "pad": -8,
+    "strings": -7,
+    "brass": -8,
+    "fx": -11,
+    "other": -6
+  },
+  "guards": {
+    "max_eq_db": 6.0,
+    "max_gr_db": 6.0,
+    "min_crest_db": 8,
+    "max_width": 1.4,
+    "max_saturation": 0.5
+  },
+  "intent": {
+    "applicability": "適合電吉他、鼓與貝斯較密集的編曲。",
+    "caveat": "不模擬amp或鼓取代；低crest來源會觸發既有壓縮保護，仍需檢查master動態。",
+    "numeric_basis": "UTUVO自己調出來的起點數值，不是音質保證。",
+    "source_refs": []
+  }
+}

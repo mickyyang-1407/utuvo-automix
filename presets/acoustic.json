@@ -1,0 +1,67 @@
+{
+  "id": "acoustic",
+  "name": "Acoustic / Singer-songwriter",
+  "description": "自然、動態、空間。",
+  "version": 1,
+  "target_lufs": -14.0,
+  "true_peak_db": -1.0,
+  "tonal_tilt_db": {
+    "low": 0.0,
+    "low_mid": 0.0,
+    "mid": 0.8,
+    "presence": 0.8,
+    "air": 0.8
+  },
+  "crest_target_db": 12.0,
+  "width": 1.0,
+  "reverb": {
+    "amount": 0.22,
+    "decay_s": 1.8,
+    "pre_delay_ms": 25,
+    "high_cut_hz": 9000
+  },
+  "compression": {
+    "drum": 0.2,
+    "bass": 0.2,
+    "vocal": 0.3,
+    "music": 0.2,
+    "bus": 0.15
+  },
+  "saturation": {
+    "drum": 0.05,
+    "bass": 0.05,
+    "vocal": 0.03,
+    "music": 0.05
+  },
+  "vocal_forward_db": 0.8,
+  "mono_below_hz": 120,
+  "role_gains_db": {
+    "kick": -2.0,
+    "snare": -3.0,
+    "hats": -8.0,
+    "toms": -4.0,
+    "cymbals": -9.0,
+    "drums_full": -2.0,
+    "bass": -4.0,
+    "sub_808": -1.0,
+    "lead_vocal": 0.0,
+    "backing_vocal": -6.0,
+    "guitar_electric": -5.0,
+    "guitar_acoustic": -3.0,
+    "keys": -6.0,
+    "piano": -3.0,
+    "synth": -6.0,
+    "pad": -10.0,
+    "strings": -6.0,
+    "brass": -7.0,
+    "fx": -12.0,
+    "other": -10.0
+  },
+  "guards": {
+    "max_eq_db": 6.0,
+    "max_gr_db": 6.0,
+    "min_crest_db": 7.0,
+    "max_width": 1.4,
+    "max_saturation": 0.5
+  }
+}

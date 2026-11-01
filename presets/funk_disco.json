@@ -1,0 +1,73 @@
+{
+  "id": "funk_disco",
+  "name": "Funk / Disco",
+  "description": "鼓貝斯靠前、節奏俐落。",
+  "version": 1,
+  "target_lufs": -12,
+  "true_peak_db": -1.0,
+  "tonal_tilt_db": {
+    "low": 0.8,
+    "low_mid": -0.2,
+    "mid": 0.2,
+    "presence": 0.5,
+    "air": 0.5
+  },
+  "crest_target_db": 11,
+  "width": 1.05,
+  "reverb": {
+    "amount": 0.12,
+    "decay_s": 1,
+    "pre_delay_ms": 18,
+    "high_cut_hz": 9000
+  },
+  "compression": {
+    "drum": 0.3,
+    "bass": 0.3,
+    "vocal": 0.25,
+    "music": 0.2,
+    "bus": 0.15
+  },
+  "saturation": {
+    "drum": 0.1,
+    "bass": 0.12,
+    "vocal": 0.04,
+    "music": 0.06
+  },
+  "vocal_forward_db": 0.5,
+  "mono_below_hz": 100,
+  "role_gains_db": {
+    "kick": -1.5,
+    "snare": -2,
+    "hats": -6,
+    "toms": -3,
+    "cymbals": -7,
+    "drums_full": -1.5,
+    "bass": -1.5,
+    "sub_808": -1,
+    "lead_vocal": 0,
+    "backing_vocal": -6,
+    "guitar_electric": -3,
+    "guitar_acoustic": -4,
+    "keys": -3,
+    "piano": -3.5,
+    "synth": -4,
+    "pad": -7,
+    "strings": -5,
+    "brass": -4,
+    "fx": -10,
+    "other": -5
+  },
+  "guards": {
+    "max_eq_db": 6.0,
+    "max_gr_db": 6.0,
+    "min_crest_db": 7.0,
+    "max_width": 1.4,
+    "max_saturation": 0.5
+  },
+  "intent": {
+    "applicability": "適合鼓、貝斯與和聲樂器互相呼應的節奏編曲。",
+    "caveat": "沒有節拍追蹤或自動groove修正；聲部比例仍取決於來源與保留量。",
+    "numeric_basis": "UTUVO自己調出來的起點數值，不是音質保證。",
+    "source_refs": []
+  }
+}

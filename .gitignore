@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+app/dist*/
+app/build*/
+!app/build_app.sh
+!app/build_smoke.py
+.DS_Store
+*.wav
+!app/demo_stems/*.wav

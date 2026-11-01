@@ -1,0 +1,73 @@
+{
+  "id": "reggae_groove",
+  "name": "Reggae / Groove",
+  "description": "低頻厚、較暗的空間。",
+  "version": 1,
+  "target_lufs": -13,
+  "true_peak_db": -1.0,
+  "tonal_tilt_db": {
+    "low": 1.5,
+    "low_mid": 0.3,
+    "mid": 0,
+    "presence": -0.5,
+    "air": -0.5
+  },
+  "crest_target_db": 12,
+  "width": 1,
+  "reverb": {
+    "amount": 0.18,
+    "decay_s": 1.7,
+    "pre_delay_ms": 35,
+    "high_cut_hz": 6500
+  },
+  "compression": {
+    "drum": 0.25,
+    "bass": 0.35,
+    "vocal": 0.25,
+    "music": 0.15,
+    "bus": 0.1
+  },
+  "saturation": {
+    "drum": 0.08,
+    "bass": 0.12,
+    "vocal": 0.03,
+    "music": 0.04
+  },
+  "vocal_forward_db": 0.5,
+  "mono_below_hz": 150,
+  "role_gains_db": {
+    "kick": -2,
+    "snare": -3,
+    "hats": -7,
+    "toms": -4,
+    "cymbals": -9,
+    "drums_full": -2,
+    "bass": -1,
+    "sub_808": -1,
+    "lead_vocal": 0,
+    "backing_vocal": -6,
+    "guitar_electric": -3,
+    "guitar_acoustic": -4,
+    "keys": -4,
+    "piano": -4,
+    "synth": -6,
+    "pad": -8,
+    "strings": -6,
+    "brass": -5,
+    "fx": -10,
+    "other": -5
+  },
+  "guards": {
+    "max_eq_db": 6.0,
+    "max_gr_db": 6.0,
+    "min_crest_db": 7.0,
+    "max_width": 1.4,
+    "max_saturation": 0.5
+  },
+  "intent": {
+    "applicability": "適合貝斯與節奏關係突出的編曲起點。",
+    "caveat": "不是Dub效果器：沒有tempo echo、delay throw或節奏式回授。 來源只代表一般意圖與監聽原則，不是Reggae配方。",
+    "numeric_basis": "UTUVO自己調出來的起點數值，不是音質保證。",
+    "source_refs": []
+  }
+}

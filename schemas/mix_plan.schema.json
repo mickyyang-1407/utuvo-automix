@@ -1,0 +1,1585 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://utuvo.example/schemas/mix_plan.schema.json",
+  "title": "UTUVO Automix MixPlan",
+  "description": "A deterministic, editable mixing plan produced from stems and a style preset.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "source",
+    "style",
+    "tracks",
+    "buses"
+  ],
+  "properties": {
+    "reverb": {
+      "properties": {
+        "manual_amount": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": true
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "sample_rate",
+        "duration_s",
+        "stems"
+      ],
+      "properties": {
+        "sample_rate": {
+          "type": "integer",
+          "minimum": 8000,
+          "maximum": 384000
+        },
+        "duration_s": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "decode_policy": {
+          "description": "Which decoder produced the source samples. Optional: a plan without it was written before the field existed and is replayed with the legacy pcm16 decoder.",
+          "type": "string",
+          "enum": [
+            "float32_v1",
+            "float32_v2",
+            "legacy_pcm16_v1"
+          ]
+        },
+        "stems": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/stem"
+          }
+        },
+        "excluded_stems": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "file",
+              "reason"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "file": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "const": "silent"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "style": {
+      "type": "object",
+      "required": [
+        "id",
+        "version",
+        "intensity"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "intensity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "balance_preserve": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "reference": {
+          "$ref": "#/$defs/reference"
+        },
+        "source_balance": {
+          "$ref": "#/$defs/source_balance"
+        },
+        "intent": {
+          "$ref": "#/$defs/style_intent"
+        }
+      },
+      "additionalProperties": true
+    },
+    "tracks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {
+        "$ref": "#/$defs/track"
+      }
+    },
+    "buses": {
+      "type": "object",
+      "properties": {
+        "drum": {
+          "$ref": "#/$defs/bus"
+        },
+        "bass": {
+          "$ref": "#/$defs/bus"
+        },
+        "music": {
+          "$ref": "#/$defs/bus"
+        },
+        "vocal": {
+          "$ref": "#/$defs/bus"
+        },
+        "fx": {
+          "$ref": "#/$defs/bus"
+        },
+        "master": {
+          "$ref": "#/$defs/master"
+        }
+      },
+      "additionalProperties": false
+    },
+    "capture_groups": {
+      "type": "object",
+      "description": "Optional receipt of the declared capture groups: which tracks are the same physical source recorded by several microphones. The renderer never reads it - the protection is already in the track numbers - and a plan without it is a normal plan.",
+      "required": [
+        "mode",
+        "groups",
+        "boundary"
+      ],
+      "properties": {
+        "mode": {
+          "const": "declared_capture_group"
+        },
+        "groups": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "members",
+              "protected_tracks",
+              "pan"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "members": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "protected_tracks": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "pan": {
+                "type": "number",
+                "minimum": -1,
+                "maximum": 1
+              },
+              "common_send": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "stereo_pair"
+                ],
+                "description": "Only on a declared stereo pair: the two members are the declared left and the declared right channel, and they keep their own pan instead of one common pan. A group without it is the same-source group and behaves exactly as before."
+              },
+              "trim_db": {
+                "type": "number",
+                "minimum": -12,
+                "maximum": 12,
+                "description": "The shared trim of a declared stereo pair, in dB: it moves both members together."
+              }
+            },
+            "additionalProperties": false,
+            "dependentRequired": {
+              "trim_db": [
+                "mode"
+              ]
+            },
+            "allOf": [
+              {
+                "if": {
+                  "required": [
+                    "mode"
+                  ],
+                  "properties": {
+                    "mode": {
+                      "const": "stereo_pair"
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "mode",
+                    "trim_db"
+                  ],
+                  "properties": {
+                    "members": {
+                      "type": "array",
+                      "minItems": 2,
+                      "maxItems": 2,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "protected_tracks": {
+                      "type": "array",
+                      "minItems": 2,
+                      "maxItems": 2,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "boundary": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "role": {
+      "type": "string",
+      "enum": [
+        "kick",
+        "snare",
+        "hats",
+        "toms",
+        "cymbals",
+        "drums_full",
+        "bass",
+        "sub_808",
+        "lead_vocal",
+        "backing_vocal",
+        "guitar_electric",
+        "guitar_acoustic",
+        "keys",
+        "piano",
+        "synth",
+        "pad",
+        "strings",
+        "brass",
+        "fx",
+        "other"
+      ]
+    },
+    "stem": {
+      "type": "object",
+      "required": [
+        "id",
+        "file",
+        "role",
+        "confidence"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "$ref": "#/$defs/role"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "sample_rate": {
+          "type": "integer"
+        },
+        "channels": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        },
+        "duration_s": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": true
+    },
+    "reference": {
+      "type": "object",
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "global",
+            "song_aligned"
+          ]
+        },
+        "lufs": {
+          "type": "number"
+        },
+        "true_peak_db": {
+          "type": "number"
+        },
+        "crest_db": {
+          "type": "number"
+        },
+        "width": {
+          "type": "number",
+          "minimum": 0
+        },
+        "tone": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 31,
+          "maxItems": 31
+        },
+        "notes": {
+          "type": "string"
+        },
+        "tone_method": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        },
+        "tone_comparison": {
+          "type": "object",
+          "required": [
+            "method",
+            "indices",
+            "centers_hz",
+            "baseline_tone",
+            "baseline_kind",
+            "before_db"
+          ],
+          "properties": {
+            "method": {
+              "const": "rms_centered_common_third_octave_db"
+            },
+            "indices": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 30
+              },
+              "uniqueItems": true,
+              "maxItems": 31
+            },
+            "centers_hz": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 31
+            },
+            "baseline_tone": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 31,
+              "maxItems": 31
+            },
+            "baseline_kind": {
+              "enum": [
+                "post_style_render",
+                "raw_gain_sum_approximation"
+              ]
+            },
+            "before_db": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "support_floor_db": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 60
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": true
+    },
+    "eq_band": {
+      "type": "object",
+      "required": [
+        "type",
+        "freq",
+        "gain_db",
+        "q"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "bell",
+            "low_shelf",
+            "high_shelf",
+            "high_pass",
+            "low_pass",
+            "notch"
+          ]
+        },
+        "freq": {
+          "type": "number",
+          "minimum": 20,
+          "maximum": 20000
+        },
+        "gain_db": {
+          "type": "number",
+          "minimum": -12,
+          "maximum": 12
+        },
+        "q": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 10
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "compressor": {
+      "type": "object",
+      "required": [
+        "threshold_db",
+        "ratio",
+        "attack_ms",
+        "release_ms"
+      ],
+      "properties": {
+        "threshold_db": {
+          "type": "number",
+          "minimum": -60,
+          "maximum": 0
+        },
+        "ratio": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "ratio_law": {
+          "description": "How ratio is read. Absent means legacy_amount_v1 (plans written before this field: effective ratio 1+(r-1)^2/5 below 6). literal_v1: the ratio is the ratio.",
+          "enum": [
+            "legacy_amount_v1",
+            "literal_v1"
+          ]
+        },
+        "attack_ms": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 200
+        },
+        "release_ms": {
+          "type": "number",
+          "minimum": 10,
+          "maximum": 2000
+        },
+        "knee_db": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 24,
+          "default": 6
+        },
+        "makeup_db": {
+          "type": "number",
+          "minimum": -12,
+          "maximum": 24,
+          "default": 0
+        },
+        "mix": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "sends": {
+      "type": "object",
+      "properties": {
+        "plate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "room": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "delay": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "track": {
+      "type": "object",
+      "required": [
+        "id",
+        "role",
+        "gain_db",
+        "pan"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "$ref": "#/$defs/role"
+        },
+        "gain_db": {
+          "type": "number",
+          "minimum": -60,
+          "maximum": 18
+        },
+        "pan": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "hpf_hz": {
+          "type": "number",
+          "minimum": 20,
+          "maximum": 500,
+          "default": 20
+        },
+        "eq": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/eq_band"
+          },
+          "maxItems": 12,
+          "default": []
+        },
+        "comp": {
+          "$ref": "#/$defs/compressor"
+        },
+        "saturation": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0
+        },
+        "sends": {
+          "$ref": "#/$defs/sends"
+        },
+        "width": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "default": 1
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1
+        },
+        "level_match": {
+          "type": "object",
+          "required": [
+            "mode",
+            "source_lufs",
+            "amount",
+            "max_gain_db",
+            "start_frame",
+            "end_frame"
+          ],
+          "properties": {
+            "mode": {
+              "const": "active_lufs_blend"
+            },
+            "amount": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_gain_db": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 6
+            },
+            "start_frame": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "end_frame": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "source_lufs": {
+              "type": "number",
+              "minimum": -100,
+              "maximum": 30
+            }
+          },
+          "additionalProperties": false
+        },
+        "dynamic_eq": {
+          "$ref": "#/$defs/dynamic_eq"
+        }
+      },
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "dynamic_eq"
+            ]
+          },
+          "then": {
+            "properties": {
+              "role": {
+                "enum": [
+                  "guitar_electric",
+                  "guitar_acoustic",
+                  "keys",
+                  "piano",
+                  "synth",
+                  "pad",
+                  "strings",
+                  "other"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "const": "other"
+              }
+            },
+            "required": [
+              "role",
+              "dynamic_eq"
+            ]
+          },
+          "then": {
+            "properties": {
+              "dynamic_eq": {
+                "properties": {
+                  "band": {
+                    "properties": {
+                      "gain_db": {
+                        "minimum": -0.8
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "bus": {
+      "type": "object",
+      "properties": {
+        "eq": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/eq_band"
+          },
+          "maxItems": 8,
+          "default": []
+        },
+        "comp": {
+          "$ref": "#/$defs/compressor"
+        },
+        "saturation": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0
+        },
+        "width": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "default": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "master": {
+      "type": "object",
+      "properties": {
+        "eq": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/eq_band"
+          },
+          "maxItems": 8,
+          "default": []
+        },
+        "comp": {
+          "$ref": "#/$defs/compressor"
+        },
+        "limiter": {
+          "type": "object",
+          "properties": {
+            "ceiling_db": {
+              "type": "number",
+              "minimum": -6,
+              "maximum": 0,
+              "default": -1
+            },
+            "lookahead_ms": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 20,
+              "default": 5
+            },
+            "release_ms": {
+              "type": "number",
+              "minimum": 10,
+              "maximum": 500,
+              "default": 80
+            }
+          },
+          "additionalProperties": true
+        },
+        "target_lufs": {
+          "type": "number",
+          "minimum": -30,
+          "maximum": -5
+        },
+        "true_peak_db": {
+          "type": "number",
+          "minimum": -6,
+          "maximum": 0,
+          "default": -1
+        }
+      },
+      "additionalProperties": true
+    },
+    "dynamic_eq": {
+      "type": "object",
+      "required": [
+        "mode",
+        "source_ids",
+        "band",
+        "curve",
+        "analysis"
+      ],
+      "properties": {
+        "mode": {
+          "const": "frozen_vocal_unmask_v1"
+        },
+        "source_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "band": {
+          "type": "object",
+          "required": [
+            "freq_hz",
+            "gain_db",
+            "q"
+          ],
+          "properties": {
+            "freq_hz": {
+              "type": "number",
+              "minimum": 200,
+              "maximum": 10000
+            },
+            "gain_db": {
+              "type": "number",
+              "minimum": -1.5,
+              "maximum": 0
+            },
+            "q": {
+              "type": "number",
+              "minimum": 0.3,
+              "maximum": 5
+            }
+          },
+          "additionalProperties": false
+        },
+        "curve": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 100000,
+          "items": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            ],
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "analysis": {
+          "type": "object",
+          "required": [
+            "method"
+          ],
+          "properties": {
+            "method": {
+              "const": "stereo_mean_square_hann100ms_hop50ms_v1"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "source_balance": {
+      "type": "object",
+      "required": [
+        "requested",
+        "resolved",
+        "requested_balance_preserve",
+        "balance_preserve",
+        "origin",
+        "proof"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "requested": {
+          "enum": [
+            "auto",
+            "balanced_stems",
+            "raw_tracks",
+            "reference_balance"
+          ]
+        },
+        "resolved": {
+          "enum": [
+            "unknown",
+            "balanced_stems",
+            "raw_tracks",
+            "reference_balance"
+          ]
+        },
+        "requested_balance_preserve": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "balance_preserve": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "origin": {
+          "enum": [
+            "explicit",
+            "default",
+            "profile",
+            "proof",
+            "reference_fit"
+          ]
+        },
+        "proof": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/source_balance_scalar_proof"
+            },
+            {
+              "$ref": "#/$defs/reference_balance_fit"
+            },
+            {
+              "$ref": "#/$defs/reference_balance_fit_v3"
+            }
+          ]
+        }
+      }
+    },
+    "style_intent": {
+      "type": "object",
+      "required": [
+        "applicability",
+        "caveat",
+        "numeric_basis",
+        "source_refs"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "applicability": {
+          "type": "string",
+          "minLength": 1
+        },
+        "caveat": {
+          "type": "string",
+          "minLength": 1
+        },
+        "numeric_basis": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "title",
+              "url",
+              "principle",
+              "access"
+            ],
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "url": {
+                "type": "string",
+                "pattern": "^https://"
+              },
+              "principle": {
+                "type": "string",
+                "minLength": 1
+              },
+              "access": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    "source_balance_scalar_proof": {
+      "type": "object",
+      "required": [
+        "method",
+        "passed",
+        "reason"
+      ],
+      "properties": {
+        "method": {
+          "const": "aligned_stereo_gain_fit_v1"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "relative_rms_residual": {
+          "type": "number",
+          "minimum": 0
+        },
+        "correlation": {
+          "type": "number",
+          "minimum": -1.0000001,
+          "maximum": 1.0000001
+        },
+        "active_coverage_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "active_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1.0000001
+        }
+      },
+      "additionalProperties": true
+    },
+    "reference_balance_fit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "passed",
+        "reason",
+        "limits",
+        "input_ids"
+      ],
+      "properties": {
+        "method": {
+          "const": "positive_stereo_time_split_v2"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "limits": {
+          "const": {
+            "method": "positive_stereo_time_split_v2",
+            "block_s": 2.0,
+            "max_design_condition": 100.0,
+            "max_aggregate_residual": 0.08,
+            "max_local_residual": 0.12,
+            "min_reference_active_s": 8.0,
+            "max_split_relative_db": 0.25,
+            "max_gain_span_db": 36.0,
+            "unique_over_reference": 0.01,
+            "unique_over_residual": 4.0,
+            "min_column_active_blocks_per_fold": 2,
+            "relative_gain_no_action_db": 0.05,
+            "active_floor_relative_power": 0.0001
+          }
+        },
+        "input_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "scalar_proof": {
+          "$ref": "#/$defs/source_balance_scalar_proof"
+        },
+        "source_duration_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "reference_duration_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "source_sample_rate": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reference_sample_rate": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "duration_difference_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sample_rate_treatment": {
+          "enum": [
+            "native",
+            "fft_resample_reference"
+          ]
+        },
+        "comparable_duration_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "active_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 32
+        },
+        "excluded_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "split_gain_spread_db": {
+          "type": "number",
+          "minimum": 0
+        },
+        "reference_active_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "common_gain_db": {
+          "type": "number"
+        },
+        "gain_span_db": {
+          "type": "number",
+          "minimum": 0
+        },
+        "design_condition": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "residual": {
+          "type": "number",
+          "minimum": 0
+        },
+        "correlation": {
+          "type": "number"
+        },
+        "common_gain_applied": {
+          "const": false
+        },
+        "raw_coefficients": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        },
+        "relative_gain_db": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": {
+            "type": "number",
+            "minimum": -18,
+            "maximum": 18
+          }
+        },
+        "folds": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "direction",
+              "design_condition",
+              "rejected"
+            ],
+            "properties": {
+              "direction": {
+                "enum": [
+                  0,
+                  1
+                ]
+              },
+              "design_condition": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "rejected": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "aggregate_residual": {
+                "type": "number",
+                "minimum": 0
+              },
+              "max_active_local_residual": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "columns": {
+                "type": "array",
+                "maxItems": 32,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "active_blocks"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "active_blocks": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "unique_over_reference": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "unique_over_residual": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "passed": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "active_ids",
+              "excluded_ids",
+              "common_gain_db",
+              "common_gain_applied",
+              "raw_coefficients",
+              "relative_gain_db",
+              "folds",
+              "gain_span_db",
+              "design_condition",
+              "residual",
+              "correlation",
+              "split_gain_spread_db",
+              "reference_active_seconds"
+            ]
+          }
+        }
+      ]
+    },
+    "reference_balance_fit_v3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "passed",
+        "reason",
+        "limits",
+        "input_ids"
+      ],
+      "properties": {
+        "method": {
+          "const": "positive_stereo_time_split_v3"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "limits": {
+          "const": {
+            "method": "positive_stereo_time_split_v3",
+            "block_s": 2.0,
+            "max_design_condition": 100.0,
+            "max_aggregate_residual": 0.08,
+            "max_local_residual": 0.12,
+            "min_reference_active_s": 8.0,
+            "max_split_relative_db": 0.25,
+            "max_gain_span_db": 36.0,
+            "unique_over_reference": 0.01,
+            "unique_over_residual": 4.0,
+            "min_column_active_blocks_per_fold": 2,
+            "relative_gain_no_action_db": 0.05,
+            "active_floor_relative_power": 0.0001,
+            "max_full_vs_fold_relative_db": 0.25
+          }
+        },
+        "input_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "scalar_proof": {
+          "$ref": "#/$defs/source_balance_scalar_proof"
+        },
+        "source_duration_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "reference_duration_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "source_sample_rate": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reference_sample_rate": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "duration_difference_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sample_rate_treatment": {
+          "enum": [
+            "native",
+            "fft_resample_reference"
+          ]
+        },
+        "comparable_duration_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "active_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 32
+        },
+        "excluded_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "split_gain_spread_db": {
+          "type": "number",
+          "minimum": 0
+        },
+        "reference_active_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "common_gain_db": {
+          "type": "number"
+        },
+        "gain_span_db": {
+          "type": "number",
+          "minimum": 0
+        },
+        "design_condition": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "residual": {
+          "type": "number",
+          "minimum": 0
+        },
+        "correlation": {
+          "type": "number"
+        },
+        "common_gain_applied": {
+          "const": false
+        },
+        "raw_coefficients": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        },
+        "relative_gain_db": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": {
+            "type": "number",
+            "minimum": -18,
+            "maximum": 18
+          }
+        },
+        "folds": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "direction",
+              "design_condition",
+              "rejected"
+            ],
+            "properties": {
+              "direction": {
+                "enum": [
+                  0,
+                  1
+                ]
+              },
+              "design_condition": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "rejected": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "aggregate_residual": {
+                "type": "number",
+                "minimum": 0
+              },
+              "max_active_local_residual": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "columns": {
+                "type": "array",
+                "maxItems": 32,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "active_blocks"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "active_blocks": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "unique_over_reference": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "unique_over_residual": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "full_vs_fold_gain_spread_db": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "passed": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "active_ids",
+              "excluded_ids",
+              "common_gain_db",
+              "common_gain_applied",
+              "raw_coefficients",
+              "relative_gain_db",
+              "folds",
+              "gain_span_db",
+              "design_condition",
+              "residual",
+              "correlation",
+              "split_gain_spread_db",
+              "reference_active_seconds",
+              "full_vs_fold_gain_spread_db"
+            ],
+            "properties": {
+              "full_vs_fold_gain_spread_db": {
+                "maximum": 0.25
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

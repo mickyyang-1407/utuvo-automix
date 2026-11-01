@@ -1,0 +1,2312 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Automix — 丟分軌，拿混音</title>
+<style>
+  :root{
+    --bg:#0e1013; --panel:#16191e; --panel2:#1d2128; --line:#2a2f38;
+    --ink:#e8ecf2; --dim:#98a2b3; --accent:#6ee7b7; --accent2:#60a5fa;
+    --warn:#fbbf24; --bad:#f87171;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:15px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Text","Noto Sans TC",sans-serif}
+  .wrap{max-width:980px;margin:0 auto;padding:28px 20px 80px}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:22px}
+  h1{font-size:22px;margin:0;letter-spacing:.2px}
+  header .sub{color:var(--dim);font-size:13px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
+  .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--dim);
+           margin:0 0 14px;font-weight:600}
+  #drop{border:2px dashed var(--line);border-radius:14px;padding:34px 18px;text-align:center;
+        cursor:pointer;transition:.15s;background:var(--panel2)}
+  #drop.hot{border-color:var(--accent);background:#15221c}
+  #drop .big{font-size:16px;margin-bottom:6px}
+  #drop .hint{color:var(--dim);font-size:13px}
+  .ctl .hint{color:var(--dim);font-size:12px;line-height:1.5;margin-top:4px}
+  #control-hint{color:var(--dim);font-size:12px;line-height:1.5;margin-top:4px}
+  .files{margin-top:14px;display:flex;flex-direction:column;gap:6px}
+  .file{display:flex;align-items:center;gap:12px;font-size:13px;
+        background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 11px}
+  /* fixed columns: badges vary in width, and without this the level and the
+     role select jump around from row to row */
+  .file .name{flex:1 1 auto;min-width:110px}
+  .file .badges{flex:0 0 200px;justify-content:flex-end}
+  .file .lvl{flex:0 0 72px}
+  .file select{flex:0 0 150px}
+  .file .tag{flex:0 0 36px}
+  .file .role{color:var(--accent);font-variant-numeric:tabular-nums}
+  .file .name{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .file .badges{display:flex;gap:6px;align-items:center}
+  .file.muted{opacity:.5}
+  .file.muted .name{text-decoration:line-through}
+  .file .rm{flex:0 0 auto;font-size:11px;padding:2px 9px;border-radius:7px;background:transparent;
+            border:1px solid var(--line);color:var(--dim);cursor:pointer}
+  .file select{background:var(--panel);border:1px solid var(--line);border-radius:7px;
+               color:var(--ink);font-size:12px;padding:3px 6px;min-width:120px}
+  .file select.over{border-color:var(--accent);color:var(--accent)}
+  .file .tag{font-size:10.5px;color:var(--dim);min-width:34px;text-align:right}
+  .file .badges{display:flex;gap:6px;align-items:center;flex:0 0 auto}
+  .badge{font-size:10.5px;padding:2px 7px;border-radius:6px;border:1px solid var(--line);color:var(--dim)}
+  .badge.bad{color:var(--bad);border-color:#5b2a2a;background:#241313}
+  .badge.warn{color:var(--warn);border-color:#4a3c14;background:#241f10}
+  .file .lvl{font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums;min-width:66px;text-align:right}
+  td.trim{white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
+  td.trim button{font-size:12px;width:20px;height:20px;line-height:1;padding:0;border-radius:5px;
+                 background:transparent;border:1px solid var(--line);color:var(--dim);cursor:pointer}
+  td.trim button:hover{border-color:var(--accent);color:var(--accent)}
+  td.pan{white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
+  td.pan button{font-size:10px;width:18px;height:18px;line-height:1;padding:0;border-radius:4px;
+                background:transparent;border:1px solid var(--line);color:var(--dim);cursor:pointer}
+  td.pan button:hover{border-color:var(--accent);color:var(--accent)}
+  td.pan span{display:inline-block;min-width:38px;text-align:center;font-size:11.5px}
+  td.trim span{display:inline-block;min-width:34px;text-align:center;font-size:11.5px;color:var(--dim)}
+  .file .rm:hover{border-color:var(--bad);color:var(--bad)}
+  .file .gname{flex:0 0 132px;background:var(--panel);border:1px solid var(--line);border-radius:7px;
+                color:var(--ink);font-size:12px;padding:3px 7px;min-width:104px}
+  .file .gname:focus{outline:none;border-color:var(--accent)}
+  .file .gname.set{border-color:var(--accent);color:var(--accent)}
+  .groups{margin-top:10px;display:flex;flex-direction:column;gap:9px}
+  .group{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--panel2)}
+  .group .ghead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  .group .gtitle{font-size:13px;font-weight:600;overflow-wrap:anywhere}
+  .group .gmem{color:var(--dim);font-size:12px;margin-top:4px;overflow-wrap:anywhere}
+  .group .grow{display:flex;align-items:center;gap:10px;margin-top:9px;flex-wrap:wrap}
+  .group .grow input[type=range]{flex:1 1 150px;min-width:120px}
+  .group .gval{font-variant-numeric:tabular-nums;font-size:12px;color:var(--dim);
+                min-width:46px;text-align:right}
+  .group .gbad{color:var(--warn);font-size:12px;margin-top:6px}
+  .group .gok{color:var(--accent);font-size:12px;margin-top:6px}
+  .group .grm{font-size:11px;padding:2px 9px;border-radius:7px;background:transparent;
+              border:1px solid var(--line);color:var(--dim);cursor:pointer}
+  .group .grm:hover{border-color:var(--bad);color:var(--bad)}
+  .gscope{font-size:12px;color:var(--dim);margin-top:10px;line-height:1.5}
+  .styles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px}
+  .style{border:1px solid var(--line);border-radius:11px;padding:11px 12px;cursor:pointer;
+         background:var(--panel2);transition:.13s;display:flex;flex-direction:column}
+  .style .n{min-height:2.6em}
+  .style:hover{border-color:#3c4453}
+  .style.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+  .style .n{font-weight:600;font-size:14px;margin-bottom:3px}
+  .style .d{color:var(--dim);font-size:12px;line-height:1.4}
+  .style-info{margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:9px;
+              color:var(--dim);font-size:12px;overflow-wrap:anywhere}
+  .style-info p{margin:4px 0}
+  .style-info a{color:var(--accent2)}
+  .style-info strong{color:var(--ink)}
+  .row{display:flex;gap:22px;flex-wrap:wrap;align-items:center;margin-top:16px}
+  .ctl{flex:1;min-width:220px}
+  .ctl label{display:flex;justify-content:space-between;font-size:13px;color:var(--dim);margin-bottom:7px}
+  .ctl label b{color:var(--ink);font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .ctl label.opt{display:flex;align-items:center;gap:8px;justify-content:flex-start;
+                 margin:10px 0 4px;font-size:12.5px;color:var(--dim);cursor:pointer}
+  .ctl label.opt input{width:14px;height:14px;accent-color:var(--accent);flex:0 0 auto}
+  .ctl label.opt b{color:var(--ink);font-weight:500}
+  .ctl select{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+              color:var(--ink);font-size:13px;padding:7px 9px}
+  button{font:inherit;border-radius:10px;border:1px solid var(--line);background:var(--panel2);
+         color:var(--ink);padding:11px 18px;cursor:pointer;transition:.13s}
+  button:hover{border-color:#3c4453}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  #go{background:var(--accent);color:#06110c;border-color:var(--accent);font-weight:700;
+      padding:13px 26px;font-size:15px}
+  #go:hover{filter:brightness(1.06)}
+  .refdrop{border:1px dashed var(--line);border-radius:10px;padding:12px;font-size:13px;
+           color:var(--dim);cursor:pointer}
+  .refdrop.set{border-style:solid;border-color:var(--accent2);color:var(--ink)}
+  .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:10px}
+  .m{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:11px}
+  .m.reference-tone{grid-column:1 / -1}
+  .m.reference-tone .k{text-transform:none;letter-spacing:0;line-height:1.5}
+  .m .k{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim)}
+  .m .v{font-size:19px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:2px}
+  .m .v small{font-size:11px;color:var(--dim);font-weight:400}
+  .ab{display:flex;gap:8px;margin:14px 0 10px}
+  .ab button{flex:0 0 auto;padding:8px 16px;font-size:13px}
+  .ab button.on{border-color:var(--accent);color:var(--accent)}
+  audio{width:100%;margin-top:4px;filter:invert(.92) hue-rotate(180deg)}
+  #wave{width:100%;height:90px;display:block;margin-top:8px;border-radius:8px;
+        background:var(--panel2);border:1px solid var(--line)}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.07em}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  .warns{margin-top:12px;display:flex;flex-direction:column;gap:6px}
+  .checks{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .check{font-size:11.5px;padding:4px 9px;border-radius:7px;border:1px solid var(--line);color:var(--dim)}
+  .check b{color:var(--ink);font-weight:500;margin-left:6px}
+  .check.ok{border-color:#2f4a3c;color:#8fe3b8}
+  .check.warn{border-color:#5b4a1f;background:#241f10;color:var(--warn)}
+  .sections{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;align-items:center}
+  .sections .lab{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-right:2px}
+  .sec{font-size:12px;padding:4px 9px;border-radius:7px;border:1px solid var(--line);color:var(--dim)}
+  .sec.chorus{border-color:var(--accent);color:var(--accent)}
+  .sec.verse{border-color:#3c4453;color:var(--ink)}
+  .warn{font-size:12.5px;color:var(--warn);background:#241f10;border:1px solid #4a3c14;
+        border-radius:8px;padding:7px 10px}
+  .err{color:var(--bad);font-size:13.5px;white-space:pre-wrap}
+  .links{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+  .links a{color:var(--accent2);text-decoration:none;font-size:13px;border:1px solid var(--line);
+           padding:7px 12px;border-radius:9px}
+  .links a:hover{border-color:var(--accent2)}
+  .hide{display:none!important}
+  body.busy #drop, body.busy #refdrop{opacity:.4;pointer-events:none}
+  body.busy .file .rm, body.busy .file select{pointer-events:none;opacity:.5}
+  .spin{display:inline-block;width:13px;height:13px;border:2px solid #06110c;
+        border-top-color:transparent;border-radius:50%;animation:s .7s linear infinite;
+        vertical-align:-2px;margin-right:7px}
+  @keyframes s{to{transform:rotate(360deg)}}
+  footer{color:var(--dim);font-size:12px;margin-top:26px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Automix</h1>
+    <span class="sub">丟分軌 → 選風格 → 拿混音（本機執行，不上傳雲端）</span>
+  </header>
+
+  <div class="card">
+    <h2>本機專案</h2>
+    <div class="row">
+      <div class="ctl">
+        <label for="project-name">專案名稱</label>
+        <input id="project-name" maxlength="120" placeholder="未命名專案">
+      </div>
+      <button id="save-project" disabled>另存專案</button>
+      <div class="ctl">
+        <label for="saved-projects">已保存的專案</label>
+        <select id="saved-projects"><option value="">尚無已保存專案</option></select>
+      </div>
+      <button id="open-project" disabled>開啟專案</button>
+    </div>
+    <div class="hint" id="project-root"></div>
+    <div class="hint">工作階段可能在 12 小時後或超過 40 個時被清理。另存的專案副本會保留素材、設定與結果；開啟時建立新的工作副本。後續編輯請再次另存。</div>
+    <div class="hint" id="project-status" aria-live="polite"></div>
+  </div>
+
+  <div id="workspace">
+  <div class="card">
+    <h2>1 · 分軌</h2>
+    <div id="drop">
+      <div class="big">把分軌拖進來</div>
+      <div class="hint">或點一下選檔案（可多選；WAV / AIFF / FLAC / MP3）</div>
+      <div class="hint" style="margin-top:8px;opacity:.7">處理時間隨曲長、軌數與來源格式而變。</div>
+    </div>
+    <input id="picker" type="file" multiple accept=".wav,.aif,.aiff,.flac,.mp3,.m4a,.ogg,.opus" class="hide">
+    <div class="files" id="files"></div>
+    <div class="hide" id="groups-wrap" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+      <div style="font-size:12.5px;color:var(--dim);margin-bottom:9px;line-height:1.6">
+        <b style="color:var(--ink)">麥克風群組</b>：同一個來源、由多支麥克風錄到的檔案，填上一樣的名稱。
+        混音時會在共用總線／母帶之前，保留它們匯入時的時間、相位與波形關係。
+        <br>不會自動對齊、不會翻轉極性、也不會消除串音；共用總線／母帶仍會改變成品。
+        <br>只支援單聲道或左右相同的雙單聲道檔案；立體聲也可能只錄到同一個來源，但這個版本先不支援成群。
+      </div>
+      <div class="groups" id="groups"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2 · 風格</h2>
+    <div class="styles" id="styles"></div>
+    <div class="style-info" id="style-info" aria-live="polite"></div>
+    <div class="row">
+      <div class="ctl">
+        <label>目標響度</label>
+        <label class="opt">
+          <input type="checkbox" id="export">
+          <span>同時匯出處理後分軌（給 DAW，約 <b id="expsize">?</b>）</span>
+        </label>
+        <select id="target">
+          <option value="">沿用風格</option>
+          <option value="-14">−14 LUFS（串流）</option>
+          <option value="-11">−11 LUFS（較響）</option>
+          <option value="-9">−9 LUFS（俱樂部）</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div class="ctl">
+        <label>風格強度 <b id="intv">1.00</b></label>
+        <input id="intensity" type="range" min="0" max="1" step="any" value="1">
+      </div>
+      <div class="ctl">
+        <label for="reverb-amount">新增殘響量 <b id="reverb-amount-v">100%</b></label>
+        <input id="reverb-amount" type="range" min="0" max="100" step="any" value="100">
+        <div class="hint">0% 保留原音檔本身的空間，只關閉本工具新增的殘響。</div>
+      </div>
+      <div class="ctl">
+        <label for="sourceprofile">來源平衡</label>
+        <select id="sourceprofile">
+          <option value="auto">自動判斷</option>
+          <option value="balanced_stems">已平衡分組</option>
+          <option value="raw_tracks">原始音軌</option>
+          <option value="reference_balance">同曲粗混平衡</option>
+        </select>
+        <label>保留原始平衡 <b id="balv">0.50</b> <span id="balmode">來源預設</span></label>
+        <input id="balance" type="range" min="0" max="1" step="any" value="0.5">
+        <button type="button" id="balance-default">回到來源預設</button>
+        <div class="hint" id="balance-intent">自動：同曲、對齊的參考曲能重建來源總和時保留 1.00；其餘維持 0.50。手動拉桿優先，不是音質判斷。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3 · 參考曲（選用）</h2>
+    <div class="refdrop" id="refdrop">丟一首你喜歡的成品，讓它照那個方向混</div>
+    <input id="refpicker" type="file" accept=".wav,.aif,.aiff,.flac,.mp3,.m4a,.ogg,.opus" class="hide">
+    <div class="row">
+      <div class="ctl">
+        <label>參考曲比重 <b id="blendv">0.70</b></label>
+        <input id="blend" type="range" min="0" max="1" step="any" value="0.7">
+      </div>
+    </div>
+  </div>
+
+  <div class="hint" id="control-hint"></div>
+
+  <div style="display:flex;gap:12px;align-items:center">
+    <button id="go" disabled>開始混音</button>
+    <button id="cancel" class="hide">取消</button>
+    <span class="sub" id="status"></span>
+  </div>
+
+  <div class="card hide" id="result">
+    <h2>結果</h2>
+    <div class="metrics" id="metrics"></div>
+    <div class="ab">
+      <button id="abmix" class="on">混音後</button>
+      <button id="abraw">原始總和</button>
+      <button id="abprev" class="hide">上一個風格</button>
+      <button id="abref" class="hide">參考曲</button>
+    </div>
+    <div class="hint" id="abnote"></div>
+    <canvas id="wave" width="1200" height="90"></canvas>
+    <audio id="player" controls preload="auto"></audio>
+    <div class="sections hide" id="exported"></div>
+    <div class="checks" id="checks"></div>
+    <div class="sections" id="sections"></div>
+    <div class="gscope hide" id="groupscope"></div>
+    <div class="warns" id="warns"></div>
+    <table id="tracks"></table>
+    <div class="links">
+      <a id="dlmix" href="#">下載 mix.wav</a>
+      <a id="dlplan" href="#" target="_blank">看 mixplan.json</a>
+      <a id="dlreport" href="#" target="_blank">看 report.md</a>
+    </div>
+  </div>
+
+  </div>
+  <footer>引擎與 CLI 共用同一套決策；這裡只是外殼。</footer>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let sessionId = null;
+let style = "pop_2020s";
+let styleLibrary = [];
+let balanceExplicit = false;
+let stems = [];
+let hasRef = false;
+let current = "mix";
+// what the published render says about the level-matched comparison pair.
+// null for a session that has none (an older one): its raw sum may have
+// been limited, so it is never presented as a matched comparison.
+let monitoring = null;
+
+let projectBusy = false;
+let projectLoading = true;
+let importsInProgress = 0;
+const pendingEdits = new Set();
+
+async function api(path, opts = {}) {
+  const request = (async () => {
+    const res = await fetch(path, opts);
+    const ctype = res.headers.get("content-type") || "";
+    const body = ctype.includes("json") ? await res.json() : await res.text();
+    if (!res.ok) throw new Error(body.error || body || res.statusText);
+    return body;
+  })();
+  const editing = opts.method === "POST" && /^\/api\/session\/[^/]+\/(stem|reference|remove|roles|trim|mute|pan|capture_groups)$/.test(path);
+  if (editing) pendingEdits.add(request);
+  try { return await request; }
+  finally { if (editing) pendingEdits.delete(request); }
+}
+
+async function ensureSession() {
+  if (!sessionId) sessionId = (await api("/api/session", { method: "POST" })).id;
+  return sessionId;
+}
+
+/* --------------------------------------------------------- local projects */
+function setProjectBusy(value) {
+  projectBusy = value;
+  $("workspace").inert = value;
+  $("project-name").disabled = value || projectLoading;
+  $("save-project").disabled = value || projectLoading;
+  $("saved-projects").disabled = value || projectLoading;
+  $("open-project").disabled = value || projectLoading || !$("saved-projects").value;
+}
+
+async function refreshProjects(selected = "") {
+  const response = await api("/api/projects");
+  const list = $("saved-projects");
+  list.replaceChildren();
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = response.projects.length ? "選擇已保存專案" : "尚無已保存專案";
+  list.appendChild(placeholder);
+  response.projects.forEach(project => {
+    const option = document.createElement("option");
+    option.value = project.id;
+    option.textContent = `${project.name} · ${new Date(project.saved_at * 1000).toLocaleString()}`;
+    list.appendChild(option);
+  });
+  list.value = selected;
+  $("project-root").textContent = `另存位置：${response.root}`;
+  $("open-project").disabled = projectBusy || projectLoading || !list.value;
+}
+
+async function settleProjectEdits(saveCurrentGroups = true) {
+  while (pendingEdits.size) await Promise.all([...pendingEdits]);
+  if (saveCurrentGroups) {
+    if (!await saveGroups()) throw new Error("群組設定尚未保存，請修正後再試");
+  } else { await groupSaveQueue; }
+  while (pendingEdits.size) await Promise.all([...pendingEdits]);
+}
+
+function projectActionReady() {
+  if (projectBusy) return false;
+  if (projectLoading) {
+    $("project-status").textContent = "工作階段仍在載入，請稍後再試。";
+    return false;
+  }
+  if (importsInProgress || document.body.classList.contains("busy")) {
+    $("project-status").textContent = "請先等匯入或混音完成，再保存／開啟專案。";
+    return false;
+  }
+  return true;
+}
+
+async function saveProject() {
+  if (!projectActionReady()) return;
+  if (!sessionId || !stems.length) {
+    $("project-status").textContent = "請先匯入分軌，再另存專案。";
+    return;
+  }
+  setProjectBusy(true);
+  $("project-status").textContent = "正在保存專案副本…";
+  try {
+    await settleProjectEdits();
+    const saved = await api(`/api/session/${sessionId}/project`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: $("project-name").value, controls: JSON.parse(runBody()) })
+    });
+    $("project-name").value = saved.name;
+    $("project-status").textContent = `已另存「${saved.name}」：${saved.path}`;
+    try { await refreshProjects(saved.id); }
+    catch (e) { $("project-status").textContent += `；列表暫時無法更新：${e.message}`; }
+  } catch (e) {
+    $("project-status").textContent = `另存失敗：${e.message}`;
+  } finally { setProjectBusy(false); }
+}
+
+async function openProject() {
+  if (!projectActionReady() || !$("saved-projects").value) return;
+  const id = $("saved-projects").value;
+  setProjectBusy(true);
+  $("project-status").textContent = "正在建立專案工作副本…";
+  try {
+    await settleProjectEdits(false);
+    const opened = await api(`/api/projects/${id}/open`, { method: "POST", body: "" });
+    // A normal document load rebuilds all working state for the new session.
+    history.replaceState(null, "", location.pathname + location.search + "#s=" + opened.id);
+    location.reload();
+  } catch (e) {
+    $("project-status").textContent = `開啟失敗：${e.message}`;
+    setProjectBusy(false);
+  }
+}
+
+$("save-project").addEventListener("click", saveProject);
+$("open-project").addEventListener("click", openProject);
+$("saved-projects").addEventListener("change", () => {
+  $("open-project").disabled = projectBusy || projectLoading || !$("saved-projects").value;
+});
+
+/* ---------------------------------------------------------------- styles */
+function showStyleIntent(savedStyle = null) {
+  const item = styleLibrary.find(s => s.id === style) || savedStyle || {};
+  const intent = (savedStyle && savedStyle.intent) || item.intent || {};
+  const box = $("style-info");
+  box.replaceChildren();
+  function line(label, text) {
+    if (!text) return;
+    const p = document.createElement("p");
+    const strong = document.createElement("strong");
+    strong.textContent = label + "：";
+    p.append(strong, document.createTextNode(text));
+    box.appendChild(p);
+  }
+  line("適用", intent.applicability || item.description);
+  line("限制", intent.caveat);
+  line("數值", intent.numeric_basis || "UTUVO自己調出來的起點數值，不是音質保證。");
+}
+async function loadStyles() {
+  const { styles } = await api("/api/styles");
+  styleLibrary = styles;
+  $("styles").innerHTML = "";
+  styles.forEach((s) => {
+    const el = document.createElement("div");
+    el.className = "style" + (s.id === style ? " sel" : "");
+    el.dataset.styleId = s.id;
+    el.innerHTML = `<div class="n"></div><div class="d"></div>`;
+    el.querySelector(".n").textContent = s.name;
+    el.querySelector(".d").textContent = s.description || "";
+    el.onclick = () => {
+      document.querySelectorAll(".style").forEach(n => n.classList.remove("sel"));
+      el.classList.add("sel");
+      style = s.id;
+      showStyleIntent();
+      refreshGo();
+    };
+    $("styles").appendChild(el);
+  });
+  showStyleIntent();
+  refreshGo();
+}
+
+/* ------------------------------------------------------------------ files */
+async function uploadStems(fileList) {
+  if (projectBusy) return;
+  const files = [...fileList].filter(f => /\.(wav|aif|aiff|flac|mp3|m4a|ogg|opus)$/i.test(f.name));
+  if (!files.length) return;
+  importsInProgress++;
+  $("status").textContent = `上傳 ${files.length} 個檔案…`;
+  try {
+    await ensureSession();
+    for (const f of files) {
+      const r = await api(`/api/session/${sessionId}/stem`, {
+        method: "POST",
+        // HTTP headers are latin-1: a UTF-8 filename has to travel
+        // percent-encoded or "音軌 02.wav" arrives as mojibake
+        headers: {
+          "X-Filename": encodeURIComponent(f.name),
+          "Content-Type": "application/octet-stream"
+        },
+        body: f
+      });
+      stems = r.stems;
+      renderFiles();
+    }
+    $("status").textContent = `${stems.length} 軌就緒`;
+    $("result").classList.add("hide");
+    loadRoles();
+  } catch (e) {
+    $("status").innerHTML = `<span class="err">上傳失敗：${e.message}</span>`;
+  } finally { importsInProgress--; }
+  refreshGo();
+}
+
+let roleInfo = {};      // name -> {role, detected, source, metrics} (what is shown)
+let confirmedRoles = {};  // name -> the last snapshot the server confirmed
+let confirmedRevision = -1;  // the highest server revision confirmed so far
+let pendingRoles = {};  // name -> {role, token}: a choice the server has not confirmed
+let tracksInfo = {};    // track id -> applied manual trim, dB
+let pansInfo = {};      // track id -> current pan
+let mutedTracks = new Set();
+// The declared capture groups: which tracks are the same physical source
+// recorded by several microphones.  The name the user types IS the group's
+// id, so two files carrying the same name are one group.
+// A group name is whatever the user typed, and "__proto__" or "constructor"
+// are legitimate names: the dictionaries are null-prototype, so a name can
+// never reach an object prototype.
+let groupByTrack = Object.create(null);   // track id -> group name
+let groupPans = Object.create(null);      // group name -> the group's common pan
+// The group's mode: "mono" is the same-source group it always was,
+// "stereo_pair" is an explicit left/right pair.  A group's mode, its two
+// sides and its shared trim belong to that group name and to no other one:
+// they are never carried over to a group the user renamed, because an
+// orientation is not a property of a file name.
+let groupModes = Object.create(null);     // group name -> "mono" | "stereo_pair"
+let groupPairLeft = Object.create(null);  // group name -> the declared left track id
+let groupPairRight = Object.create(null); // group name -> the declared right track id
+let groupPairTrims = Object.create(null); // group name -> the shared pair trim, dB
+// What the user typed in the shared gain field, kept as text.  An entry that
+// is empty or out of range is a draft: it is never turned into a zero and
+// never silently replaced by the last valid value.
+let groupPairGains = Object.create(null); // group name -> the raw gain text
+// What the server has for each group.  A pair that is not finished is a
+// local draft: the server keeps what it already had, and the UI says so.
+let groupSavedDecl = Object.create(null); // group name -> the declaration the server holds
+let trackIds = Object.create(null);       // file name -> the engine's own track id
+let allRoles = [];
+// The API takes any number in 0..1, a slider has a step of its own: the exact
+// restored value is kept here until the user touches that control, so an
+// unedited run sends the value the session was saved with.
+let exactControls = {};
+// Every manual role request gets a number, so an old answer or an old failure
+// cannot undo a newer request even when the same role value is asked for
+// again.
+let roleRequestSeq = 0;
+let roleRequestToken = {};     // name -> the number of the newest request
+
+// The track id the engine uses: the file name without its extension.  The
+// server sends it with the role snapshot, so this is the engine's own id and
+// not a guess made here.
+function tidOf(name) {
+  if (trackIds[name]) return trackIds[name];
+  const info = roleInfo[name];
+  if (info && info.id) return info.id;
+  return name.replace(/\.[^.]+$/, "").replace(/ /g, "_");
+}
+
+function fileNameOf(tid) {
+  const n = stems.find(n => tidOf(n) === tid);
+  return n || tid;
+}
+
+// The declaration the engine understands: one group per name, with the
+// tracks that carry it and the one pan the whole group sits at.
+function captureGroupsPayload() {
+  // A group name is user text, so it may be "__proto__" or "constructor":
+  // the dictionary is null-prototype and the pan is read as an own property,
+  // so no name can ever reach an object prototype.
+  const byName = Object.create(null);
+  Object.entries(groupByTrack).forEach(([tid, name]) => {
+    const n = (name || "").trim();
+    if (!n) return;
+    (byName[n] = byName[n] || []).push(tid);
+  });
+  const out = [];
+  Object.keys(byName).forEach(name => {
+    const decl = declarationFor(name, byName[name]);
+    if (decl) { out.push(decl); return; }
+    // A pair that is not finished is never sent: the declaration the server
+    // already holds is kept, so a draft never becomes a pair the user did
+    // not describe.
+    const saved = (typeof groupSavedDecl !== "undefined" &&
+      Object.prototype.hasOwnProperty.call(groupSavedDecl, name))
+      ? groupSavedDecl[name] : null;
+    if (saved) out.push(saved);
+  });
+  return out;
+}
+
+// The pair state of a group, when this page knows about pairs.  The state is
+// read defensively: a page that has no pair state at all still describes the
+// same-source groups it always did, and the declaration never depends on a
+// dictionary that is not there.
+function pairState(name) {
+  if (typeof groupModes === "undefined") return null;
+  if (groupModes[name] !== "stereo_pair") return null;
+  const left = typeof groupPairLeft === "undefined" ? "" : (groupPairLeft[name] || "");
+  const right = typeof groupPairRight === "undefined" ? "" : (groupPairRight[name] || "");
+  const trim = typeof groupPairTrims === "undefined" ? 0 : Number(groupPairTrims[name] || 0);
+  // The gain is kept as the text the user typed.  A field that was never
+  // touched shows the exact restored number; a field the user cleared or
+  // filled with something out of range stays exactly as it is, so it can be
+  // reported instead of quietly becoming a zero or the previous value.
+  const raw = typeof groupPairGains === "undefined" ? undefined : groupPairGains[name];
+  const text = raw === undefined ? String(trim) : raw;
+  const parsed = Number(text);
+  const valid = text !== "" && Number.isFinite(parsed) && parsed >= -12 && parsed <= 12;
+  return {
+    left: left,
+    right: right,
+    trim: trim,
+    text: text,
+    valid: valid,
+    value: valid ? parsed : trim
+  };
+}
+
+// The declaration of one group, as the user has it in front of them.
+//
+// A same-source group is the files that carry the same name.  A stereo pair
+// is two of those files, and the user says which one is the left channel and
+// which one is the right channel: the order of the members IS the channel
+// identity, and it is never taken from the file order or from a file name.
+//
+// Returns null for a pair that is not finished yet.  Such a pair stays a
+// local draft: the server keeps the declaration it already has, and the UI
+// says 尚未儲存.
+function declarationFor(name, members) {
+  const pan = Object.prototype.hasOwnProperty.call(groupPans, name) ? Number(groupPans[name]) : 0;
+  const pair = pairState(name);
+  if (!pair) {
+    return { id: name, members: members.slice(), pan: pan };
+  }
+  const left = pair.left;
+  const right = pair.right;
+  if (!left || !right || left === right) return null;
+  if (!members.includes(left) || !members.includes(right)) return null;
+  if (members.length !== 2) return null;
+  // An unfinished or invalid shared gain is not a pair we can send: the
+  // declaration the server already holds stays, and the UI says so.
+  if (!pair.valid) return null;
+  return {
+    id: name,
+    members: [left, right],
+    pan: pan,
+    mode: "stereo_pair",
+    trim_db: pair.value
+  };
+}
+
+// Are two declarations the same declaration?  The member order is part of
+// it: swapping the left and the right channel is a different declaration.
+function sameDeclaration(a, b) {
+  if (!a || !b) return false;
+  if (a.id !== b.id) return false;
+  if (JSON.stringify(a.members || []) !== JSON.stringify(b.members || [])) return false;
+  if (Number(a.pan) !== Number(b.pan)) return false;
+  const am = a.mode === "stereo_pair" ? "stereo_pair" : "mono";
+  const bm = b.mode === "stereo_pair" ? "stereo_pair" : "mono";
+  if (am !== bm) return false;
+  if (am === "stereo_pair" && Number(a.trim_db || 0) !== Number(b.trim_db || 0)) return false;
+  return true;
+}
+
+// What can be wrong with a same-source group.  These are the reasons it has
+// always had.
+function monoGroupProblem(name, members) {
+  if (members.length < 2) {
+    return `麥克風群組「${name}」只有 ${members.length} 軌：至少要有兩支麥克風的檔案，才能保留它們之間的關係。`;
+  }
+  const excluded = members.filter(t => mutedTracks.has(t));
+  if (excluded.length) {
+    return `麥克風群組「${name}」有成員被排除（${excluded.map(fileNameOf).join("、")}）：請先把它納入混音，或從群組移除。`;
+  }
+  const gone = members.filter(t => !stems.some(n => tidOf(n) === t));
+  if (gone.length) {
+    return `麥克風群組「${name}」的成員檔案已不在這次混音裡（${gone.map(fileNameOf).join("、")}）：請移除群組或加回檔案。`;
+  }
+  const roles = [...new Set(members.map(t => {
+    const n = stems.find(n => tidOf(n) === t);
+    return n ? ((roleInfo[n] || {}).role || "") : "";
+  }).filter(Boolean))];
+  if (roles.length > 1) {
+    return `麥克風群組「${name}」的成員角色不一致（${roles.join("、")}）：同一個群組必須是同一種角色。`;
+  }
+  return "";
+}
+
+// What can be wrong with a stereo pair.  Every one of these blocks the mix:
+// a half-declared pair would otherwise be mixed as something the user did
+// not say.
+function pairGroupProblem(name, members) {
+  if (members.length > 2) {
+    return `立體聲配對「${name}」有 ${members.length} 個成員：配對只有兩軌（左聲道與右聲道），請先把多出來的成員移出這個群組。`;
+  }
+  if (members.length < 2) {
+    return `立體聲配對「${name}」只有 ${members.length} 個成員：配對需要兩軌，把兩支檔案填上同一個群組名稱，再指定左右聲道。`;
+  }
+  const left = groupPairLeft[name] || "";
+  const right = groupPairRight[name] || "";
+  if (!left || !right) {
+    const missing = !left && !right ? "左聲道與右聲道" : (!left ? "左聲道" : "右聲道");
+    return `立體聲配對「${name}」還沒有指定${missing}：請先選好左右聲道，這個配對才會生效。`;
+  }
+  if (left === right) {
+    return `立體聲配對「${name}」的左右聲道是同一軌（${fileNameOf(left)}）：左聲道與右聲道必須是兩條不同的軌。`;
+  }
+  const gone = [left, right].filter(t => !stems.some(n => tidOf(n) === t));
+  if (gone.length) {
+    return `立體聲配對「${name}」指定的聲道檔案已不在這次混音裡（${gone.map(fileNameOf).join("、")}）：請重新指定左右聲道。`;
+  }
+  const stale = [left, right].filter(t => !members.includes(t));
+  if (stale.length) {
+    return `立體聲配對「${name}」指定的聲道（${stale.map(fileNameOf).join("、")}）已經不在這個群組裡：請重新指定左右聲道。`;
+  }
+  const excluded = [left, right].filter(t => mutedTracks.has(t));
+  if (excluded.length) {
+    return `立體聲配對「${name}」的聲道被排除（${excluded.map(fileNameOf).join("、")}）：請先把它納入混音，或從群組移除。`;
+  }
+  const pair = pairState(name);
+  if (pair && !pair.valid) {
+    const shown = pair.text === "" ? "（空白）" : pair.text;
+    return `立體聲配對「${name}」的配對增益現在是 ${shown}：必須是 −12..12 之間的數字。` +
+      "改成有效的數字之前，這個配對不會送出，伺服器仍保留先前的宣告。";
+  }
+  const roles = [...new Set([left, right].map(t => {
+    const n = stems.find(n => tidOf(n) === t);
+    return n ? ((roleInfo[n] || {}).role || "") : "";
+  }).filter(Boolean))];
+  if (roles.length > 1) {
+    return `立體聲配對「${name}」的左右角色不一致（${roles.join("、")}）：配對的兩軌必須是同一種角色。`;
+  }
+  return "";
+}
+
+// A group that cannot be protected is refused with a reason, before the mix
+// starts: the audio it protects is either missing or not in the mix, and
+// saying so is better than a mix that only looks protected.
+function groupProblemText() {
+  const byName = Object.create(null);
+  Object.entries(groupByTrack).forEach(([tid, name]) => {
+    const n = (name || "").trim();
+    if (!n) return;
+    (byName[n] = byName[n] || []).push(tid);
+  });
+  for (const name of Object.keys(byName)) {
+    const members = byName[name];
+    const problem = groupModes[name] === "stereo_pair"
+      ? pairGroupProblem(name, members)
+      : monoGroupProblem(name, members);
+    if (problem) return problem;
+  }
+  return "";
+}
+
+let groupSaveQueue = Promise.resolve();
+
+async function saveGroups() {
+  if (!sessionId) return true;
+  const sid = sessionId;
+  // Run awaits this queue too: an earlier save response must be handled
+  // before a new render can publish its result.
+  const save = async () => {
+    if (sessionId !== sid) return false;
+    const groups = captureGroupsPayload();
+    try {
+      const saved = await api(`/api/session/${sid}/capture_groups`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groups: groups })
+      });
+      if (sessionId !== sid) return false;
+      if (saved.changed === true) {
+        // The server no longer serves this render. A delayed A/B metadata
+        // answer must not resume its obsolete media after this edit.
+        ++abGen;
+        abIntent = null;
+        abRestored = false;
+        abOwnPauses = 0;
+        abUserSpoke = true;
+        const player = $("player");
+        player.pause();
+        player.removeAttribute("src");
+        player.load();
+        invalidateComparison();
+        $("result").classList.add("hide");
+        $("status").textContent = "群組設定已變更，重新混音後生效";
+      }
+      // What the server holds now is what was sent.  A pair that was not
+      // finished kept the declaration it already had, so it is unchanged here.
+      groups.forEach(g => { groupSavedDecl[g.id] = g; });
+      return true;
+    } catch (e) {
+      if (sessionId !== sid) return false;
+      const span = document.createElement("span");
+      span.className = "err";
+      span.textContent = e.message;
+      $("status").innerHTML = "";
+      $("status").appendChild(span);
+      return false;
+    }
+  };
+  const job = groupSaveQueue.then(save);
+  groupSaveQueue = job.catch(() => false);
+  return job;
+}
+
+async function setGroupName(tid, value) {
+  const name = (value || "").trim();
+  if (name) groupByTrack[tid] = name;
+  else delete groupByTrack[tid];
+  // a group that no longer has a member takes its pan with it
+  const live = new Set(Object.values(groupByTrack));
+  Object.keys(groupPans).forEach(k => { if (!live.has(k)) delete groupPans[k]; });
+  // The same for the pair state.  A mode, an orientation and a shared trim
+  // belong to the group they were made for: renaming a group's files must
+  // never carry a left/right choice over to another group.
+  Object.keys(groupModes).forEach(k => { if (!live.has(k)) delete groupModes[k]; });
+  Object.keys(groupPairLeft).forEach(k => { if (!live.has(k)) delete groupPairLeft[k]; });
+  Object.keys(groupPairRight).forEach(k => { if (!live.has(k)) delete groupPairRight[k]; });
+  Object.keys(groupPairTrims).forEach(k => { if (!live.has(k)) delete groupPairTrims[k]; });
+  Object.keys(groupPairGains).forEach(k => { if (!live.has(k)) delete groupPairGains[k]; });
+  Object.keys(groupSavedDecl).forEach(k => { if (!live.has(k)) delete groupSavedDecl[k]; });
+  renderFiles();
+  await saveGroups();
+}
+
+// A DOM id that is safe for any group name: the name is user text and may
+// contain anything at all, so it is never used as an id itself.
+let groupDomSeq = 0;
+function groupDomId(prefix) {
+  groupDomSeq += 1;
+  return `g-${prefix}-${groupDomSeq}`;
+}
+
+function renderGroups() {
+  const wrap = $("groups-wrap");
+  const box = $("groups");
+  const names = [...new Set(Object.values(groupByTrack))].filter(Boolean);
+  wrap.classList.toggle("hide", names.length === 0);
+  box.innerHTML = "";
+  names.forEach(name => {
+    const members = Object.keys(groupByTrack).filter(t => groupByTrack[t] === name);
+    const isPair = groupModes[name] === "stereo_pair";
+    const panValue = Object.prototype.hasOwnProperty.call(groupPans, name)
+      ? Number(groupPans[name]) : 0;
+    const g = document.createElement("div");
+    g.className = "group";
+
+    const head = document.createElement("div");
+    head.className = "ghead";
+    const title = document.createElement("span");
+    title.className = "gtitle";
+    title.textContent = name;          // a name the user typed: text, never markup
+    head.appendChild(title);
+    const rm = document.createElement("button");
+    rm.className = "grm";
+    rm.textContent = "移除群組";
+    rm.onclick = async () => {
+      members.forEach(t => delete groupByTrack[t]);
+      delete groupPans[name];
+      delete groupModes[name];
+      delete groupPairLeft[name];
+      delete groupPairRight[name];
+      delete groupPairTrims[name];
+      delete groupPairGains[name];
+      delete groupSavedDecl[name];
+      renderFiles();
+      await saveGroups();
+    };
+    head.appendChild(rm);
+    g.appendChild(head);
+
+    const mem = document.createElement("div");
+    mem.className = "gmem";
+    mem.textContent = "成員：" + members.map(fileNameOf).join("、");
+    g.appendChild(mem);
+
+    // The mode of the group.  The default is the same-source group it has
+    // always been: a mode is something the user picks, never something the
+    // file order or the file names decide.
+    const modeRow = document.createElement("div");
+    modeRow.className = "grow";
+    const modeLab = document.createElement("label");
+    modeLab.textContent = "群組模式：" + name;
+    const modeSel = document.createElement("select");
+    modeSel.id = groupDomId("mode");
+    modeLab.htmlFor = modeSel.id;
+    modeSel.setAttribute("aria-label", "群組模式：" + name);
+    [["mono", "同來源多麥克風"], ["stereo_pair", "立體聲配對（兩軌）"]].forEach(choice => {
+      const o = document.createElement("option");
+      o.value = choice[0];
+      o.textContent = choice[1];
+      if ((isPair ? "stereo_pair" : "mono") === choice[0]) o.selected = true;
+      modeSel.appendChild(o);
+    });
+    modeSel.onchange = async () => {
+      groupModes[name] = modeSel.value;
+      renderFiles();
+      await saveGroups();
+      renderGroups();
+    };
+    modeRow.appendChild(modeLab);
+    modeRow.appendChild(modeSel);
+    g.appendChild(modeRow);
+
+    if (isPair) {
+      // ---- the pair's own controls --------------------------------------
+      const left = groupPairLeft[name] || "";
+      const right = groupPairRight[name] || "";
+      const sideRow = (which, label, current) => {
+        const row = document.createElement("div");
+        row.className = "grow";
+        const lab = document.createElement("label");
+        lab.textContent = label + "：" + name;
+        const sel = document.createElement("select");
+        sel.id = groupDomId(which);
+        lab.htmlFor = sel.id;
+        sel.setAttribute("aria-label", label + "：" + name);
+        const none = document.createElement("option");
+        none.value = "";
+        none.textContent = "— 尚未指定 —";
+        none.selected = !current;
+        sel.appendChild(none);
+        members.forEach(t => {
+          const o = document.createElement("option");
+          o.value = t;
+          o.textContent = fileNameOf(t);
+          if (current === t) o.selected = true;
+          sel.appendChild(o);
+        });
+        sel.onchange = async () => {
+          if (which === "left") groupPairLeft[name] = sel.value;
+          else groupPairRight[name] = sel.value;
+          renderFiles();
+          await saveGroups();
+          renderGroups();
+        };
+        row.appendChild(lab);
+        row.appendChild(sel);
+        return row;
+      };
+      g.appendChild(sideRow("left", "左聲道", left));
+      g.appendChild(sideRow("right", "右聲道", right));
+
+      // the shared position: a stereo image position, not a balance
+      const posRow = document.createElement("div");
+      posRow.className = "grow";
+      const posLab = document.createElement("label");
+      posLab.textContent = "配對位置：" + name;
+      const range = document.createElement("input");
+      range.type = "range";
+      range.min = "-1"; range.max = "1"; range.step = "any";
+      range.value = String(panValue);
+      range.id = groupDomId("pos");
+      posLab.htmlFor = range.id;
+      range.setAttribute("aria-label", "配對位置：" + name);
+      const val = document.createElement("span");
+      val.className = "gval";
+      val.textContent = fmt(range.value, 2);
+      range.oninput = () => {
+        groupPans[name] = Number(range.value);
+        val.textContent = fmt(range.value, 2);
+      };
+      range.onchange = async () => {
+        await saveGroups();
+        renderGroups();
+      };
+      posRow.appendChild(posLab);
+      posRow.appendChild(range);
+      posRow.appendChild(val);
+      g.appendChild(posRow);
+
+      const posHint = document.createElement("div");
+      posHint.className = "gmem";
+      posHint.textContent =
+        "配對位置是立體聲定位，不是左右平衡：往一側偏移時影像會收窄，兩軌在極值會疊到同一側。";
+      g.appendChild(posHint);
+
+      // the shared gain
+      const gainRow = document.createElement("div");
+      gainRow.className = "grow";
+      const gainLab = document.createElement("label");
+      gainLab.textContent = "配對增益：" + name;
+      const gain = document.createElement("input");
+      gain.type = "number";
+      gain.min = "-12"; gain.max = "12"; gain.step = "any";
+      const gainState = pairState(name);
+      gain.value = gainState ? gainState.text : "0";
+      gain.id = groupDomId("gain");
+      gainLab.htmlFor = gain.id;
+      gain.setAttribute("aria-label", "配對增益：" + name);
+      const unit = document.createElement("span");
+      unit.className = "gval";
+      unit.textContent = "dB（左右兩軌一起）";
+      gain.oninput = () => {
+        // What the user typed is kept as it is: an empty or out-of-range
+        // entry is a draft that has to be reported, not a zero and not the
+        // value that happened to be there before.
+        groupPairGains[name] = gain.value;
+        const v = Number(gain.value);
+        if (gain.value !== "" && Number.isFinite(v) && v >= -12 && v <= 12) {
+          groupPairTrims[name] = v;
+        }
+      };
+      gain.onchange = async () => {
+        await saveGroups();
+        renderGroups();
+      };
+      gainRow.appendChild(gainLab);
+      gainRow.appendChild(gain);
+      gainRow.appendChild(unit);
+      g.appendChild(gainRow);
+
+      const problem = pairGroupProblem(name, members);
+      const status = document.createElement("div");
+      if (problem) {
+        status.className = "gbad";
+        status.textContent = problem;
+      } else {
+        status.className = "gok";
+        status.textContent = "立體聲配對：左聲道 " + fileNameOf(left) + "、右聲道 " + fileNameOf(right) +
+          " 各自保留自己的聲道與位置；共用總線／母帶之前維持匯入時的左右關係" +
+          "（偏移配對位置或個別覆寫會改變這個關係）。";
+      }
+      g.appendChild(status);
+
+      const saved = Object.prototype.hasOwnProperty.call(groupSavedDecl, name)
+        ? groupSavedDecl[name] : null;
+      if (!sameDeclaration(declarationFor(name, members), saved)) {
+        const draft = document.createElement("div");
+        draft.className = "warn";
+        draft.textContent =
+          "尚未儲存：這個立體聲配對還沒有送出，伺服器仍保留先前的宣告；選好左右聲道之後才會生效。";
+        g.appendChild(draft);
+      }
+    } else {
+      // ---- the same-source group, exactly as it was ---------------------
+      const row = document.createElement("div");
+      row.className = "grow";
+      const lab = document.createElement("label");
+      lab.textContent = "群組共用位置";
+      const range = document.createElement("input");
+      range.type = "range";
+      range.min = "-1"; range.max = "1"; range.step = "any";
+      range.value = String(panValue);
+      const val = document.createElement("span");
+      val.className = "gval";
+      val.textContent = fmt(range.value, 2);
+      range.oninput = () => {
+        groupPans[name] = Number(range.value);
+        val.textContent = fmt(range.value, 2);
+      };
+      range.onchange = async () => { await saveGroups(); };
+      row.appendChild(lab);
+      row.appendChild(range);
+      row.appendChild(val);
+      g.appendChild(row);
+
+      const excluded = members.filter(t => mutedTracks.has(t));
+      const gone = members.filter(t => !stems.some(n => tidOf(n) === t));
+      const status = document.createElement("div");
+      if (members.length < 2) {
+        status.className = "gbad";
+        status.textContent = "還需要至少兩軌才會保留關係；把另一支麥克風的檔案填上同一個名稱即可。";
+      } else if (gone.length) {
+        status.className = "gbad";
+        status.textContent = "有成員的檔案已不在這次混音裡（" + gone.map(fileNameOf).join("、") + "）：這個群組無法保留關係。";
+      } else if (excluded.length) {
+        status.className = "gbad";
+        status.textContent = "有成員被排除（" + excluded.map(fileNameOf).join("、") + "）：這個群組無法保留關係。";
+      } else {
+        status.className = "gok";
+        status.textContent = "會在共用總線／母帶之前，保留這 " + members.length + " 軌匯入時的時間、相位與波形關係。";
+      }
+      g.appendChild(status);
+    }
+    box.appendChild(g);
+  });
+}
+
+function renderFiles() {
+  $("files").innerHTML = "";
+  stems.forEach(n => {
+    const d = document.createElement("div");
+    d.className = "file";
+
+    const nm = document.createElement("span");
+    nm.className = "name";
+    nm.textContent = n;
+    d.appendChild(nm);
+
+    const info = roleInfo[n] || {};
+    const m = info.metrics || null;
+
+    const play = document.createElement("button");
+    play.className = "rm";
+    play.textContent = "▶";
+    play.title = "試聽這軌原始檔案";
+    play.onclick = (ev) => {
+      ev.stopPropagation();
+      // a solo is its own view: it is not part of the level-matched
+      // comparison, and it keeps the playhead where the user left it
+      switchSource(
+        `/api/session/${sessionId}/audio/stem/${encodeURIComponent(n)}?v=${Date.now()}`,
+        {forcePlay: true});
+      ["abmix", "abraw", "abref", "abprev"].forEach(id => $(id).classList.remove("on"));
+      // a solo is not part of the comparison: the note must not keep
+      // claiming that it is
+      setABNote(monitoring, "solo");
+    };
+    d.appendChild(play);
+
+    if (m) {
+      const badges = document.createElement("span");
+      badges.className = "badges";
+      const addBadge = (txt, cls) => {
+        const b = document.createElement("span");
+        b.className = "badge" + (cls ? " " + cls : "");
+        b.textContent = txt;
+        badges.appendChild(b);
+      };
+      if (m.silent) addBadge("靜音", "bad");
+      if (m.clipped_ratio > 0.005) addBadge(`削波 ${(m.clipped_ratio * 100).toFixed(0)}%`, "bad");
+      if (!m.silent && m.lufs < -30) addBadge("很小聲", "warn");
+      if (!m.silent && m.lufs > -6) addBadge("過熱", "warn");
+      // sibilance is a vocal problem; hats and snares are *supposed* to be bright
+      if (!m.silent && m.sibilance >= 0.05 && /vocal/.test(info.role || "")) {
+        addBadge("齒音", "warn");
+      }
+      if (m.active_s > 0) addBadge(`${m.active_s.toFixed(0)}s`, "");
+      d.appendChild(badges);
+
+      const lvl = document.createElement("span");
+      lvl.className = "lvl";
+      lvl.textContent = m.silent ? "—" : `${m.lufs.toFixed(1)} LUFS`;
+      d.appendChild(lvl);
+    }
+
+    const sel = document.createElement("select");
+    sel.title = info.source === "user"
+      ? (info.detected ? `手動指定（自動判斷是 ${info.detected}）` : "手動指定（自動判斷尚未完成）")
+      : "自動判斷；判斷錯可以直接改";
+    allRoles.forEach(r => {
+      const o = document.createElement("option");
+      o.value = r;
+      o.textContent = r;
+      if (r === (info.role || "other")) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.classList.toggle("over", info.source === "user");
+    sel.onchange = (ev) => setRole(n, ev.target.value);
+    d.appendChild(sel);
+
+    const tag = document.createElement("span");
+    tag.className = "tag";
+    tag.textContent = info.source === "user" ? "手動" : "自動";
+    d.appendChild(tag);
+
+    const gname = document.createElement("input");
+    gname.type = "text";
+    gname.className = "gname";
+    gname.maxLength = 64;
+    gname.placeholder = "群組名稱";
+    gname.title = "不同支麥克風錄到同一個來源：填一樣的名稱";
+    gname.value = groupByTrack[tidOf(n)] || "";
+    if (gname.value) gname.classList.add("set");
+    gname.onchange = () => { setGroupName(tidOf(n), gname.value); };
+    d.appendChild(gname);
+
+    const mute = document.createElement("button");
+    mute.className = "rm";
+    const tid = tidOf(n);
+    const isMuted = mutedTracks.has(tid);
+    mute.textContent = isMuted ? "納入" : "排除";
+    mute.title = isMuted ? "加回混音" : "從混音中排除（檔案保留）";
+    mute.onclick = async (ev) => {
+      ev.stopPropagation();
+      try {
+        await api(`/api/session/${sessionId}/mute`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ track_id: tid, muted: !isMuted })
+        });
+        if (isMuted) mutedTracks.delete(tid); else mutedTracks.add(tid);
+        renderFiles();
+        $("result").classList.add("stale");
+        invalidateComparison();
+        $("status").textContent = isMuted ? "已納入，重新混音後生效" : "已排除，重新混音後生效";
+      } catch (e) {
+        $("status").innerHTML = `<span class="err">${e.message}</span>`;
+      }
+    };
+    d.appendChild(mute);
+
+    const x = document.createElement("button");
+    x.className = "rm";
+    x.textContent = "移除";
+    x.title = "從這次混音中移除這一軌";
+    x.onclick = (ev) => { ev.stopPropagation(); removeStem(n); };
+    d.appendChild(x);
+
+    if (isMuted) d.classList.add("muted");
+    $("files").appendChild(d);
+  });
+  renderGroups();
+}
+
+// A role the user set by hand must survive a detection response that was
+// already on its way when the change was made: the GET /roles answer was
+// computed before the change, so merging it last would lose the choice.
+// The display is the confirmed snapshot with the user's pending choice on
+// top: a committed manual role is already part of the server's snapshot, so
+// it is not kept here as a permanent override over newer confirmations.
+function mergeRoleInfo(confirmed) {
+  const merged = Object.assign({}, confirmed);
+  for (const [name, pending] of Object.entries(pendingRoles)) {
+    merged[name] = Object.assign({}, merged[name] || {}, { role: pending.role, source: "user" });
+  }
+  return merged;
+}
+
+// A role snapshot is applied only when the server says it is not older than
+// what has already been confirmed.  The revision is what makes that order
+// knowable -- the order the answers happen to arrive in is not.
+function applyRoleSnapshot(roles, revision) {
+  const rev = Number.isFinite(revision) ? revision : 0;
+  if (rev < confirmedRevision) return false;
+  confirmedRevision = rev;
+  const next = Object.assign({}, confirmedRoles);
+  for (const [name, entry] of Object.entries(roles || {})) {
+    next[name] = Object.assign({}, next[name] || {}, entry);
+  }
+  confirmedRoles = next;
+  return true;
+}
+
+// The saved manual roles arrive with the session state.  The detection call
+// that fills in the rest of the roles can take many seconds, and until it
+// comes back the user should see their own choices, not "other".
+function seedManualRoles(saved, revision) {
+  for (const [name, role] of Object.entries(saved || {})) {
+    confirmedRoles[name] = Object.assign({}, confirmedRoles[name] || {}, { role, source: "user" });
+  }
+  if (Number.isFinite(revision)) confirmedRevision = Math.max(confirmedRevision, revision);
+  roleInfo = mergeRoleInfo(confirmedRoles);
+}
+
+async function loadRoles() {
+  if (!sessionId || !stems.length) return;
+  try {
+    const r = await api(`/api/session/${sessionId}/roles`);
+    applyRoleSnapshot(r.roles, r.role_revision);
+    roleInfo = mergeRoleInfo(confirmedRoles);
+    renderFiles();
+  } catch (_) { /* roles are a nicety; never block the mixer */ }
+}
+
+async function setRole(name, role) {
+  // The choice is protected before the request goes out: a detection answer
+  // that is already on its way must not show the old role in the meantime.
+  const token = ++roleRequestSeq;
+  roleRequestToken[name] = token;
+  pendingRoles[name] = { role, token };
+  roleInfo = mergeRoleInfo(confirmedRoles);
+  renderFiles();
+  try {
+    const r = await api(`/api/session/${sessionId}/roles`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roles: { [name]: role } })
+    });
+    // the server took it, so its snapshot is the truth -- as long as it is
+    // not older than what we already confirmed
+    applyRoleSnapshot(r.roles, r.role_revision);
+    roleInfo = mergeRoleInfo(confirmedRoles);
+    renderFiles();
+    // an older success must not speak over a newer choice: only the newest
+    // request for this stem may move the status line or hide the result
+    if (roleRequestToken[name] === token) {
+      if (pendingRoles[name] && pendingRoles[name].token === token) delete pendingRoles[name];
+      roleInfo = mergeRoleInfo(confirmedRoles);
+      renderFiles();
+      $("result").classList.add("hide");
+      $("status").textContent = "角色已更新，重新混音即可";
+    }
+  } catch (e) {
+    // The save failed, so this is not a saved choice: go back to what the
+    // server last confirmed, not to an optimistic choice that was never
+    // accepted.  Only the newest request for this stem may undo anything.
+    if (roleRequestToken[name] === token) {
+      if (pendingRoles[name] && pendingRoles[name].token === token) delete pendingRoles[name];
+      roleInfo = mergeRoleInfo(confirmedRoles);
+      renderFiles();
+      $("status").innerHTML = `<span class="err">${e.message}</span>`;
+    }
+  }
+}
+
+async function removeStem(name) {
+  try {
+    const r = await api(`/api/session/${sessionId}/remove`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name })
+    });
+    stems = r.stems;
+    renderFiles();
+    // a stale result panel next to a changed stem list is a lie
+    $("result").classList.add("hide");
+    $("status").textContent = stems.length ? `${stems.length} 軌就緒` : "";
+  } catch (e) {
+    $("status").innerHTML = `<span class="err">${e.message}</span>`;
+  }
+  refreshGo();
+}
+
+async function uploadRef(file) {
+  if (!file || projectBusy) return;
+  importsInProgress++;
+  try {
+    await ensureSession();
+    await api(`/api/session/${sessionId}/reference`, {
+      method: "POST",
+      headers: {
+        "X-Filename": encodeURIComponent(file.name),
+        "Content-Type": "application/octet-stream"
+      },
+      body: file
+    });
+    hasRef = true;
+    $("refdrop").textContent = `參考曲：${file.name}`;
+    $("refdrop").classList.add("set");
+    refreshRefButton();
+  } catch (e) {
+    $("refdrop").textContent = `參考曲失敗：${e.message}`;
+  } finally { importsInProgress--; }
+  refreshGo();
+}
+
+function refreshGo() {
+  $("go").disabled = !(stems.length > 0 && style);
+}
+
+/* ------------------------------------------------------------------- drag */
+function wireDrop(el, onFiles, hotClass) {
+  ["dragenter", "dragover"].forEach(ev => el.addEventListener(ev, e => {
+    e.preventDefault(); el.classList.add(hotClass);
+  }));
+  ["dragleave", "drop"].forEach(ev => el.addEventListener(ev, e => {
+    e.preventDefault(); el.classList.remove(hotClass);
+  }));
+  el.addEventListener("drop", e => {
+    if (e.dataTransfer.files && e.dataTransfer.files.length) onFiles(e.dataTransfer.files);
+  });
+  el.addEventListener("click", () => el._picker && el._picker.click());
+}
+
+/* -------------------------------------------------------------------- run */
+function fmt(v, digits = 2) { return (v >= 0 ? "" : "") + Number(v).toFixed(digits); }
+
+async function run() {
+  if (!stems.length || !style) return;
+  // A group that cannot be protected stops the mix here, with a reason the
+  // user can act on: the mix would otherwise run without the protection the
+  // group claims.
+  const problem = groupProblemText();
+  if (problem) {
+    const span = document.createElement("span");
+    span.className = "err";
+    span.textContent = problem;
+    $("status").innerHTML = "";
+    $("status").appendChild(span);
+    return;
+  }
+  const btn = $("go");
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spin"></span>混音中…`;
+  $("status").textContent = "";
+  const t0 = performance.now();
+  // Keep visible progress while a render is running.
+  // A live clock plus an expectation is cheaper than a job queue and just as
+  // honest about what is happening.
+  const cancelBtn = $("cancel");
+  cancelBtn.classList.remove("hide");
+  document.body.classList.add("busy");
+  // A cancellation belongs to the run that asked for it, and to the attempt
+  // that asked for it.  These locals are that ownership: they live and die
+  // with this run, so a late reply can never speak over this run's terminal
+  // result, over the feedback of a newer run, or over a newer cancel attempt.
+  let runActive = true;    // this run has not reached its terminal response yet
+  let cancelState = null;  // null | "pending" | "acked" | "error"
+  let cancelError = null;  // the newest attempt failed in transport
+  let cancelAttempt = 0;   // which cancel attempt of this run is the newest
+  const stageName = {
+    loading: "讀取分軌", roles: "判斷角色", measuring: "量測", planning: "建立計畫",
+    rendering: "渲染", writing: "寫檔", starting: "啟動"
+  };
+  let latest = null;
+  const paintProgress = () => {
+    const secs = ((performance.now() - t0) / 1000).toFixed(1);
+    const st = latest && latest.stage ? (stageName[latest.stage] || latest.stage) : "處理中";
+    const count = latest && latest.total ? ` ${latest.done}/${latest.total}` : "";
+    const line = `${st}${count}… ${secs}s`;
+    if (cancelError) {
+      // A cancel that failed in transport stays on screen next to the live
+      // progress: the render may still be running, so the status line must
+      // not pretend it stopped.
+      $("status").innerHTML = `<span class="err">${cancelError}</span> ${line}`;
+    } else {
+      $("status").textContent = line;
+    }
+  };
+  cancelBtn.onclick = async () => {
+    // There is nothing to cancel if this run has already ended.
+    if (!runActive) return;
+    // This click is the newest attempt; an older attempt keeps its answer to
+    // itself and must not touch the feedback of this one.
+    const attempt = ++cancelAttempt;
+    // Say it right away: the render is still running and the answer may take
+    // a moment.  A new attempt starts from a clean slate, so the previous
+    // attempt's error does not stay on screen.
+    cancelState = "pending";
+    cancelError = null;
+    $("status").textContent = "正在取消…";
+    try {
+      const r = await api(`/api/session/${sessionId}/cancel`, { method: "POST", body: "" });
+      // The run ended while this request was in flight, or a newer attempt
+      // has taken over: their result and their feedback own the screen.
+      if (!runActive || attempt !== cancelAttempt) return;
+      if (r && r.cancelled === false) {
+        // The server did not cancel anything: the render is still going, so
+        // stop claiming a pending cancellation and go back to progress.
+        if (cancelState === "acked") return;
+        cancelState = null;
+        paintProgress();
+      } else {
+        // The request was acknowledged.  The render response is still the
+        // authority on how this run ends, so the pending line stays up.
+        cancelState = "acked";
+      }
+    } catch (e) {
+      // The cancel request failed in transport.  That does not prove the
+      // server never saw it, so the render may still be running: say why,
+      // and keep it visible next to the live progress line.
+      if (!runActive || attempt !== cancelAttempt) return;
+      cancelState = "error";
+      cancelError = e.message;
+      paintProgress();
+    }
+  };
+  const tick = setInterval(() => {
+    // While a cancellation is on screen it is the truth right now: an
+    // ordinary progress tick must not tick over it.  A cancel that failed
+    // keeps its message, repainted together with the live progress.
+    if (cancelState === "pending" || cancelState === "acked") return;
+    paintProgress();
+  }, 200);
+  const poll = setInterval(async () => {
+    try {
+      const r = await api(`/api/session/${sessionId}/progress`);
+      if (r.progress) latest = r.progress;
+    } catch (_) {}
+  }, 400);
+  try {
+    // the grouping must be in the session before the mix reads it
+    if (!await saveGroups()) throw new Error("群組設定沒有存成，這次混音沒有開始");
+    const body = runBody();
+    const r = await api(`/api/session/${sessionId}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body
+    });
+    show(r, ((performance.now() - t0) / 1000).toFixed(1));
+    // the mix is saved now, so the hint says what happened to it: the older
+    // "cannot be restored" wording is no longer true, and naming a superseded
+    // result would only be misleading
+    $("control-hint").textContent = "已儲存這次成功混音的設定。";
+    // the exact restored values stay: they are the values the session was
+    // saved with, and they only step aside when the user touches that control
+    try { history.replaceState(null, "", "#s=" + sessionId); } catch (_) {}
+  } catch (e) {
+    const cancelled = /cancelled/i.test(e.message);
+    $("status").innerHTML = cancelled
+      ? "已取消"
+      : `<span class="err">${e.message}</span>`;
+  } finally {
+    // This run is over: from here on a late cancel reply has nothing to say.
+    runActive = false;
+    clearInterval(tick);
+    clearInterval(poll);
+    document.body.classList.remove("busy");
+    cancelBtn.classList.add("hide");
+    cancelBtn.onclick = null;
+    btn.textContent = "開始混音";
+    refreshGo();
+  }
+}
+
+function roughBalanceStatus(decision) {
+  if (decision.origin === "explicit") return "手動保留量優先，已略過擬合";
+  if (decision.origin === "proof") return "來源原比例可保留：共同增益證據成立，未加逐軌校正；後續保護限制仍可能改變結果";
+  if (decision.origin === "reference_fit") return "來源音量擬合通過；只驗證處理前比例，後續保護限制與處理仍可能改變結果";
+  const reasons = {
+    no_reference_audio: "尚未提供同曲粗混", duration_mismatch: "長度／時間軸不符",
+    shorter_than_minimum_coverage: "素材短於8秒", rank_or_condition: "聲部過於相似，無法辨識各軌",
+    nonpositive_coefficient: "部分聲部可能被移除或反相，無法只靠音量確認", digital_silence: "來源為靜音",
+    split_coefficients_unstable: "不同時段的比例不穩定", pooled_coefficients_unstable: "整體與分段推算不一致", relative_gain_span_out_of_bounds: "所需校正超過安全範圍",
+    insufficient_reference_coverage: "參考活動時間不足", local_or_global_validation_mismatch: "部分時段無法重建",
+    insufficient_column_coverage: "聲部有效活動時間不足", weak_or_unresolved_column: "弱聲部沒有足夠辨識證據",
+    not_coherent_linear_same_content: "不符合對齊的同曲音量模型", more_than_32_nonzero_stems: "超過32個非零聲部"
+  };
+  return "未通過：" + (reasons[decision.proof?.reason] || "無法確認同曲音量關係") + "；回退一般預設0.50，未套用部分校正";
+}
+const profileNames = { auto: "自動判斷", balanced_stems: "已平衡分組", raw_tracks: "原始音軌", reference_balance: "同曲粗混平衡", unknown: "未確認，沿用預設" };
+// The ordinary keep amount of a source profile: what the engine uses when the
+// user did not ask for a specific one.
+function profileDefault(profile) {
+  return profile === "balanced_stems" ? 1 : 0.5;
+}
+function balanceWhy(decision) {
+  if (!decision) return "";
+  if (decision.requested === "reference_balance") return roughBalanceStatus(decision);
+  if (decision.origin === "proof") return "同曲對齊重建證據成立";
+  if (decision.origin === "explicit") return "採用手動拉桿";
+  if (decision.requested === "balanced_stems") return "採用已平衡分組宣告";
+  return "未取得同曲重建證據，保留一般預設";
+}
+function show(r, secs) {
+  // what the published render says about the comparison pair.  A session
+  // that has none (an older one) is reported, never guessed at.
+  monitoring = r.monitoring || null;
+  refreshABState();
+  setABNote(monitoring, "mix");
+  const decision = r.source_balance || (r.style || {}).source_balance;
+  if (r.style && r.style.id) {
+    style = r.style.id;
+    showStyleIntent(r.style);
+    document.querySelectorAll(".style").forEach(el => el.classList.toggle("sel", el.dataset.styleId === style));
+    if (r.style.intensity != null) {
+      $("intensity").value = r.style.intensity;
+      $("intv").textContent = Number(r.style.intensity).toFixed(2);
+    }
+  }
+  if (decision) {
+    $("sourceprofile").value = decision.requested;
+    balanceExplicit = decision.requested_balance_preserve != null;
+    // The slider is an editable control: it shows what was asked for, not the
+    // amount the engine fitted.  The fitted amount stays in the intent text.
+    const shown = balanceExplicit ? decision.requested_balance_preserve : profileDefault(decision.requested);
+    $("balance").value = String(shown);
+    $("balv").textContent = Number(shown).toFixed(2);
+    $("balmode").textContent = balanceExplicit ? "手動覆寫" : "來源預設";
+    const why = balanceWhy(decision);
+    $("balance-intent").textContent = `${profileNames[decision.resolved]} · 實際保留 ${Number(decision.balance_preserve).toFixed(2)} · ${why}；軌道處理後、bus/master 前的平衡，不是音質分數。`;
+  } else if ((r.style || {}).balance_preserve != null) {
+    // An older session only has the amount the engine ended up with.  That is
+    // a result, not a choice, so it must not become a manual intent.
+    balanceExplicit = false;
+    const shown = profileDefault($("sourceprofile").value);
+    $("balance").value = String(shown);
+    $("balv").textContent = Number(shown).toFixed(2);
+    $("balmode").textContent = "來源預設";
+  }
+  $("result").classList.remove("hide");
+  const cells = [
+    ["響度", fmt(r.lufs, 2), "LUFS", `目標 ${fmt(r.target_lufs, 2)}`],
+    ["真峰值", fmt(r.true_peak_db, 2), "dBTP", `上限 ${fmt(r.ceiling_db, 2)}`],
+    ["動態", fmt(r.crest_db, 1), "dB", "crest"],
+    ["寬度", fmt(r.width, 3), "", "side/mid"],
+    ["相關性", fmt(r.correlation, 2), "", "1 = 單聲道"],
+    ["耗時", secs, /^[\d.]+$/.test(secs) ? "s" : "", r.reference_passes > 1 ? "參考曲兩階段" : ""],
+    ["平衡", fmt((r.style || {}).balance_preserve ?? 0, 2), "", decision ? `${profileNames[decision.resolved]} · ${balanceExplicit ? "手動覆寫" : decision.origin === "proof" ? "同曲重建證據" : decision.origin === "reference_fit" ? "同曲音量擬合" : "來源預設"}；bus/master 仍會改變成品` : "軌道處理後保留平衡；bus/master 仍會改變成品"]
+  ];
+  if (decision && decision.requested === "reference_balance") {
+    const verdict = decision.origin === "reference_fit" ? "擬合通過" : decision.origin === "proof" ? "原比例可保留" : decision.origin === "explicit" ? "手動略過" : "未通過";
+    cells.push(["同曲粗混（來源證據）", verdict, "", roughBalanceStatus(decision), "reference-tone"]);
+  }
+  if (r.reference_tone) {
+    const t = r.reference_tone;
+    const note = t.after_db == null ? "可比頻帶不足" : t.after_db <= 0.5 ? "已接近參考音色" :
+      t.after_db < t.before_db ? "差距縮小，仍有落差" : "本次未縮小";
+    cells.push(["參考音色距離", t.after_db == null ? "資訊不足" : `${fmt(t.before_db, 2)} → ${fmt(t.after_db, 2)}`,
+      t.after_db == null ? "" : "dB", `套用參考前→後 · ${t.band_count} 個共同頻帶 · ${note}；不是音質分數`, "reference-tone"]);
+  }
+  $("metrics").innerHTML = cells.map(([k, v, u, s, extra = ""]) =>
+    `<div class="m ${extra}"><div class="k">${k}</div><div class="v">${v} <small>${u}</small></div>
+     <div class="k" style="margin-top:4px">${s}</div></div>`).join("");
+
+  const exp = $("exported");
+  if (r.exported && r.exported.length) {
+    const total = r.exported.reduce((n, e) => n + e.bytes, 0);
+    const summary = r.export_summary || {};
+    const gap = (summary.comparison || {}).reference_minus_sum_rms_dbfs;
+    exp.innerHTML =
+      `<span class="lab">已匯出 ${r.exported.length} 個檔案 · ${(total / 1048576).toFixed(1)} MB</span>` +
+      (summary.common_gain_db != null ? `<p>共同匯出增益 ${fmt(summary.common_gain_db, 2)} dB · 成品比含殘響的分軌總和 ${gap == null ? "無法量測" : fmt(gap, 2) + " dB"}。分軌經 bus/master 前的差異詳見匯出報告。</p>` : "") +
+      r.exported.map(e =>
+        `<a class="sec" href="/api/session/${sessionId}/processed/file/${encodeURIComponent(e.name)}" download>${e.name}</a>`
+      ).join("");
+    exp.classList.remove("hide");
+  } else {
+    exp.classList.add("hide");
+    exp.innerHTML = "";
+  }
+
+  const chk = $("checks");
+  if (r.verdicts && r.verdicts.length) {
+    chk.innerHTML = r.verdicts.map(v => {
+      const ok = v.verdict === "ok";
+      return `<span class="check ${ok ? "ok" : "warn"}">${v.check}<b>${v.measured}</b></span>`;
+    }).join("");
+  } else {
+    chk.innerHTML = "";
+  }
+
+  const secList = r.sections || [];
+  const secBox = $("sections");
+  if (secList.length > 1) {
+    secBox.innerHTML = `<span class="lab">段落</span>` + secList.map(s =>
+      `<span class="sec ${s.label}">${s.label} ${s.start_s.toFixed(0)}–${s.end_s.toFixed(0)}s</span>`
+    ).join("");
+  } else {
+    secBox.innerHTML = "";
+  }
+
+  // What the capture groups protected, and where that protection stops.  The
+// group name is text the user typed, so it is written as text.
+const gs = $("groupscope");
+const receipt = r.capture_groups;
+if (receipt && (receipt.groups || []).length) {
+  gs.innerHTML = "";
+  const head = document.createElement("div");
+  head.className = "lab";
+  head.textContent = "麥克風群組保護（共用總線／母帶之前）";
+  gs.appendChild(head);
+  receipt.groups.forEach(g => {
+    const line = document.createElement("div");
+    if (g.mode === "stereo_pair") {
+      const pair = g.members || [];
+      line.textContent = `${g.id}：立體聲配對 — 左聲道 ${pair[0] || ""}、右聲道 ${pair[1] || ""}` +
+        ` · 配對位置 ${fmt(g.pan, 2)} · 共用增益 ${fmt(g.trim_db, 2)} dB`;
+    } else {
+      line.textContent = `${g.id}：${(g.protected_tracks || []).join("、")} · 共用位置 ${fmt(g.pan, 2)}`;
+    }
+    gs.appendChild(line);
+    (g.notes || []).forEach(n => {
+      const nd = document.createElement("div");
+      nd.className = "warn";
+      nd.textContent = n;
+      gs.appendChild(nd);
+    });
+  });
+  const scope = document.createElement("div");
+  scope.style.marginTop = "6px";
+  scope.textContent =
+    "保護範圍只到共用總線／母帶之前：保留的是匯入時的時間、相位與波形關係。" +
+    "不會自動對齊、不會翻轉極性、不會消除串音；共用總線／母帶仍會改變成品。";
+  gs.appendChild(scope);
+  if ((receipt.groups || []).some(g => g.mode === "stereo_pair")) {
+    const pairScope = document.createElement("div");
+    pairScope.style.marginTop = "6px";
+    pairScope.textContent =
+      "立體聲配對：左右兩軌不會被合成一個共用位置，各自保留自己的聲道與位置。" +
+      "配對位置在 0 時維持匯入的左右關係；往一側偏移時影像會收窄，兩軌在極值會疊到同一側 —— " +
+      "這是立體聲定位，不是左右平衡，也不是品質保證。共用增益是兩軌一起移動。";
+    gs.appendChild(pairScope);
+  }
+  gs.classList.remove("hide");
+} else {
+  gs.innerHTML = "";
+  gs.classList.add("hide");
+}
+
+const w = $("warns");
+  w.innerHTML = "";
+  (r.warnings || []).forEach(t => {
+    const d = document.createElement("div");
+    d.className = "warn";
+    d.textContent = t;
+    w.appendChild(d);
+  });
+
+  tracksInfo = {};
+  pansInfo = {};
+  r.tracks.forEach(t => {
+    tracksInfo[t.id] = Number(t.trim_db || 0);
+    pansInfo[t.id] = Number(t.pan || 0);
+  });
+  const unmaskTitle = effect => {
+    if (!effect) return "本次未套用人聲讓位";
+    const probes = effect.probes || [];
+    if (!probes.length) return "顯示曲線宣告的中心最大衰減；尚無可量測的穩定片段，不作實測主張（壓縮前）";
+    const measured = probes.map(p => Number(p.measured_db));
+    return `穩定片段窄頻實測變化 ${fmt(Math.min(...measured), 2)}～${fmt(Math.max(...measured), 2)} dB；${probes.length} 個片段，於動態 EQ 這一步、壓縮前量測`;
+  };
+  const rows = r.tracks.map(t => `<tr>
+      <td>${t.id}</td>
+      <td>${t.role}</td>
+      <td class="num">${t.gain_db >= 0 ? "+" : ""}${fmt(t.gain_db, 2)}</td>
+      <td class="pan">
+        <button data-pan="${t.id}" data-d="-0.1">◀</button>
+        <span>${fmt(t.pan, 2)}</span>
+        <button data-pan="${t.id}" data-d="0.1">▶</button>
+        <button data-pan="${t.id}" data-pan-value="0" aria-label="聲像歸零：${t.id}" title="將此軌聲像偏移設為 0（取消額外的左右偏移；寬度與效果維持不變）">0</button>
+      </td>
+      <td class="num">${fmt(t.hpf_hz, 0)}</td>
+      <td class="num">${fmt(t.send, 3)}</td>
+      <td class="num">${t.ride_db ? `${fmt(t.ride_db[0], 1)}…${fmt(t.ride_db[1], 1)}` : "—"}</td>
+      <td class="num" title="${unmaskTitle(t.dynamic_eq)}">${t.dynamic_eq ? `${fmt(t.dynamic_eq.duty_fraction * 100, 1)}% 時間<br>${fmt((t.dynamic_eq.center_hz || 3200) / 1000, 1)} kHz 中心最多 ${fmt(t.dynamic_eq.max_nominal_cut_db, 2)} dB` : "未讓位"}</td>
+      <td class="trim">
+        <button data-trim="${t.id}" data-d="-0.5">−</button>
+        <span>${t.trim_db ? (t.trim_db > 0 ? "+" : "") + fmt(t.trim_db, 1) : "0"}</span>
+        <button data-trim="${t.id}" data-d="0.5">+</button>
+      </td>
+    </tr>`).join("");
+  $("tracks").innerHTML =
+    `<tr><th>軌道</th><th>角色</th><th>增益 dB</th><th>pan</th><th>HPF Hz</th><th>reverb</th><th>動態 dB</th><th>人聲讓位</th><th>微調</th></tr>${rows}`;
+
+  $("dlmix").href = `/api/session/${sessionId}/download/mix`;
+  $("dlplan").href = `/api/session/${sessionId}/plan`;
+  $("dlreport").href = `/api/session/${sessionId}/report`;
+  refreshPrevButton(r);
+  const dur = r.duration_s || 0;
+  if (dur > 0) {
+    const n = r.tracks.length + 1;
+    const mb = dur * (r.sample_rate || 48000) * 2 * 3 * n / 1048576;
+    $("expsize").textContent = `${mb.toFixed(0)} MB`;
+    // a capacity warning, not just a number: the export writes one 24-bit
+    // stereo WAV per track, so a long session adds up fast
+    if (mb > 300) {
+      $("expsize").title = "素材很大，匯出會佔不少磁碟空間，也可能跑一陣子";
+      $("expsize").style.color = "var(--warn)";
+    } else {
+      $("expsize").title = "";
+      $("expsize").style.color = "";
+    }
+  }
+  // a new render is a new song: the comparison starts at the beginning
+  setAB("mix", {fresh: true});
+  $("status").textContent = `${r.tracks.length} 軌完成`;
+}
+
+async function drawWave(kind) {
+  const cv = $("wave");
+  if (!cv || !sessionId) return;
+  let data = null;
+  try { data = await api(`/api/session/${sessionId}/peaks?kind=${kind}`); } catch (_) { return; }
+  const ctx = cv.getContext("2d");
+  const w = cv.width, h = cv.height;
+  ctx.clearRect(0, 0, w, h);
+  const peaks = data.peaks || [];
+  if (!peaks.length) return;
+
+  // section shading
+  const dur = data.duration_s || 1;
+  (data.sections || []).forEach(sec => {
+    if (sec.label === "chorus") {
+      ctx.fillStyle = "rgba(110, 231, 183, 0.10)";
+      ctx.fillRect((sec.start_s / dur) * w, 0, ((sec.end_s - sec.start_s) / dur) * w, h);
+    }
+  });
+
+  ctx.fillStyle = "rgba(160, 174, 192, 0.85)";
+  const mid = h / 2;
+  peaks.forEach((p, i) => {
+    const x = (i / peaks.length) * w;
+    const amp = Math.max(1, Math.pow(p, 0.6) * mid * 0.95);
+    ctx.fillRect(x, mid - amp, Math.max(1, w / peaks.length - 0.5), amp * 2);
+  });
+  cv._dur = dur;
+}
+
+function drawPlayhead() {
+  const cv = $("wave"), p = $("player");
+  if (!cv || !cv._peaksDrawn) return;
+}
+
+function refreshPrevButton(r) {
+  const btn = $("abprev");
+  if (!btn) return;
+  const has = !!(r && r.prev_style);
+  btn.classList.toggle("hide", !has);
+  if (has) btn.textContent = `上一個：${r.prev_style}`;
+}
+
+// ---------------------------------------------------------- the A/B switch
+//
+// Changing the view must not restart the music.  Where the playhead is and
+// whether it is playing are captured *before* the source is replaced, and
+// put back once the new source has said how long it is.  Every switch
+// carries a number, so a slow answer to an old switch can never move the
+// playhead of a newer one.
+
+let abGen = 0;             // the generation of the newest switch
+let abIntent = null;       // {gen, at, resume, url}
+let abRestored = false;    // the newest switch has been restored
+let abOwnPauses = 0;       // pause events our own load is expected to cause
+let abUserSpoke = false;   // the user touched the player while it loaded
+
+function switchSource(url, opts) {
+  const p = $("player");
+  const o = opts || {};
+  const fresh = !!o.fresh;
+  const gen = ++abGen;
+  // The position and the intent to keep playing are captured *before* the
+  // source is replaced: afterwards the element has forgotten both.  A
+  // switch that is still waiting for its metadata keeps the position that
+  // was saved, so a quick second click does not lose it -- and an answer
+  // that arrives late cannot put the playhead back to the beginning.
+  const pending = abIntent;
+  const waiting = !!(pending && !abRestored);
+  const at = fresh ? 0 : (waiting ? pending.at
+                        : (isFinite(p.currentTime) ? p.currentTime : 0));
+  // an explicit request to play (a solo) wins over a switch that is still
+  // waiting for its own answer
+  const resume = fresh ? false
+    : (waiting ? (pending.resume || !!o.forcePlay)
+       : (!p.paused || !!o.forcePlay));
+  abIntent = {gen, at, resume, url};
+  // our own load stops the element: that pause is ours, not the user's
+  abOwnPauses = resume ? 1 : 0;
+  abUserSpoke = false;
+  abRestored = false;
+  // the previous answer belongs to the previous switch: its listener stays
+  // registered until it finds itself stale, and then it lets itself go
+  const onMeta = () => {
+    if (gen !== abGen) {
+      p.removeEventListener("loadedmetadata", onMeta);
+      return;                      // a newer switch took over: this is stale
+    }
+    restoreAfterSwitch(gen, url);
+  };
+  p.addEventListener("loadedmetadata", onMeta);
+  p.src = url;
+  p.load();
+}
+
+function restoreAfterSwitch(gen, url) {
+  const p = $("player");
+  const intent = abIntent;
+  if (!intent || intent.gen !== gen) return;       // a stale answer
+  const attr = (p.getAttribute && p.getAttribute("src")) || p.src;
+  if (attr && url && String(attr).indexOf(url) < 0) return;  // another source
+  const dur = p.duration;
+  let t = intent.at;
+  if (!isFinite(t) || t < 0) t = 0;
+  if (isFinite(dur) && dur > 0) t = Math.min(t, dur);
+  try { p.currentTime = t; } catch (_) {}
+  if (intent.resume) p.play().catch(() => {});
+  abRestored = true;
+}
+
+// The mix and the untreated sum are compared through the level-matched
+// monitoring pair.  The export mix is a different thing: it is what the
+// user downloads, and it is never used for the comparison.
+function abSource(kind) {
+  const matched = !!(monitoring && monitoring.status === "matched");
+  if (kind === "mix") return matched ? "monitor/mix" : "mix";
+  if (kind === "raw") return matched ? "monitor/raw" : null;
+  return kind;  // the previous mix and the reference keep their own meaning
+}
+
+function abPeaks(kind) {
+  const matched = !!(monitoring && monitoring.status === "matched");
+  if (kind === "mix") return matched ? "monitor_mix" : "mix";
+  if (kind === "raw") return matched ? "monitor_raw" : "raw";
+  return kind;
+}
+
+function refreshABState() {
+  const matched = !!(monitoring && monitoring.status === "matched");
+  const btn = $("abraw");
+  if (!btn) return;
+  btn.disabled = !matched;
+  btn.title = matched
+    ? "未處理的原始總和，與混音後在同一個音量比較"
+    : "這個工作階段還沒有等響度比較；重新混音後才會有";
+}
+
+function invalidateComparison() {
+  // an edit makes the render -- and the comparison pair that belongs to it --
+  // stale: the pair must not be presented as current any more
+  monitoring = null;
+  refreshABState();
+  setABNote(monitoring, "mix");
+}
+
+function setABNote(mon, kind) {
+  const el = $("abnote");
+  if (!el) return;
+  if (kind === "prev" || kind === "reference") {
+    // these two are not part of the level-matched pair: the reference still
+    // goes through its own gain and ceiling, so calling it "unprocessed"
+    // would be as untrue as claiming the pair covers it
+    el.textContent = "這個視圖不在目前的等響度配對範圍內：它沒有和「混音後」一起配對音量。";
+    return;
+  }
+  if (kind === "solo") {
+    el.textContent = "單軌試聽是原始分軌，沒有做等響度配對。";
+    return;
+  }
+  if (!mon) {
+    el.textContent = "比較音量：這個工作階段還沒有等響度比較（重新混音後才會有）。輸出的音量與檔案不受影響。";
+    return;
+  }
+  if (mon.status !== "matched") {
+    const reason = mon.reason || "";
+    if (reason === "remixed-required") {
+      el.textContent = "比較音量：這個工作階段還沒有等響度比較（重新混音後才會有）。輸出的音量與檔案不受影響。";
+    } else if (reason === "file-incomplete") {
+      el.textContent = "比較音量：等響度比較的檔案不完整，請重新混音。輸出的音量與檔案不受影響。";
+    } else {
+      const missing = (mon.unavailable || []).join("、");
+      el.textContent = `比較音量：${missing || "其中一側"}無法量測音量（靜音或太短），這不是等響度比較。輸出的音量與檔案不受影響。`;
+    }
+    return;
+  }
+  const level = Number(mon.level_lufs).toFixed(1);
+  const exported = Number(mon.export_lufs).toFixed(1);
+  const off = Number(mon.level_offset_db || 0);
+  const delta = off <= -0.05 ? `，比輸出低 ${Math.abs(off).toFixed(1)} dB` : "";
+  const head = mon.headroom_db == null ? ""
+    : `，離真峰值上限還有 ${Number(mon.headroom_db).toFixed(1)} dB`;
+  el.textContent =
+    `比較音量：${level} LUFS（輸出 ${exported} LUFS${delta}）。` +
+    `「混音後」與「原始總和」是同一個音量，各自只調整固定音量${head}。`;
+}
+
+function setAB(kind, opts) {
+  current = kind;
+  $("abmix").classList.toggle("on", kind === "mix");
+  $("abprev").classList.toggle("on", kind === "prev");
+  $("abraw").classList.toggle("on", kind === "raw");
+  $("abref").classList.toggle("on", kind === "reference");
+  const src = abSource(kind);
+  setABNote(monitoring, kind);
+  if (!src) {
+    // there is no honest comparison to play: say so and leave the music be
+    return;
+  }
+  switchSource(`/api/session/${sessionId}/audio/${src}?v=${Date.now()}`, opts);
+  if (typeof drawWave === "function") drawWave(abPeaks(kind));
+}
+
+$("player").addEventListener("play", () => {
+  // the user pressed play while the new source was still loading: from
+  // here on their intent counts, not the one we saved
+  abUserSpoke = true;
+});
+$("player").addEventListener("error", () => { abOwnPauses = 0; });
+$("player").addEventListener("pause", () => {
+  if (abRestored) {
+    // after the restore a pause is the user's: it must not be undone
+    if (abIntent) abIntent.resume = false;
+    return;
+  }
+  if (abUserSpoke) {
+    // the user pressed play and then pause while the source was loading:
+    // that newer intent wins over the one we saved
+    if (abIntent) abIntent.resume = false;
+    return;
+  }
+  if (abOwnPauses > 0) {
+    // this is the pause our own load caused, not the user's
+    abOwnPauses -= 1;
+    return;
+  }
+  if (abIntent) abIntent.resume = false;
+});
+
+// ---------------------------------------------------------- end of the A/B switch
+
+$("tracks").addEventListener("click", async (ev) => {
+  const pbtn = ev.target.closest("button[data-pan]");
+  if (pbtn) {
+    ev.stopPropagation();
+    const id = pbtn.dataset.pan;
+    // 明示的絕對值優先：0 是合法的目標值，不是「沒給值」，所以不能被當成 falsy
+    // 而 fallback 成 ±0.1 偏移（偏移值 0.22 一步也回不到 0）。
+    const absolute = pbtn.hasAttribute("data-pan-value")
+      ? Number(pbtn.getAttribute("data-pan-value"))
+      : NaN;
+    const next = Number.isFinite(absolute)
+      ? Math.max(-1, Math.min(1, absolute))
+      : Math.max(-1, Math.min(1, (pansInfo[id] ?? 0) + parseFloat(pbtn.dataset.d)));
+    try {
+      const r = await api(`/api/session/${sessionId}/pan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ track_id: id, pan: Math.round(next * 100) / 100 })
+      });
+      pansInfo[id] = r.pans[id];
+      pbtn.closest("td").querySelector("span").textContent = pansInfo[id].toFixed(2);
+      $("result").classList.add("stale");
+      invalidateComparison();
+      $("status").textContent = "已調整 pan，重新混音後生效";
+    } catch (e) {
+      $("status").innerHTML = `<span class="err">${e.message}</span>`;
+    }
+    return;
+  }
+
+  const btn = ev.target.closest("button[data-trim]");
+  if (!btn) return;
+  const id = btn.dataset.trim;
+  const delta = parseFloat(btn.dataset.d);
+  const row = tracksInfo[id] || 0;
+  try {
+    await api(`/api/session/${sessionId}/trim`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trims: { [id]: row + delta } })
+    });
+    tracksInfo[id] = Math.round((row + delta) * 100) / 100;
+    btn.closest("tr").querySelector("td.trim span").textContent =
+      (tracksInfo[id] > 0 ? "+" : "") + tracksInfo[id].toFixed(1);
+    $("result").classList.add("stale");
+    invalidateComparison();
+    $("status").textContent = "已調整，重新混音後生效";
+  } catch (e) {
+    $("status").innerHTML = `<span class="err">${e.message}</span>`;
+  }
+});
+
+/* ------------------------------------------------------------------- wire */
+wireDrop($("drop"), uploadStems, "hot");
+$("drop")._picker = $("picker");
+$("picker").addEventListener("change", e => uploadStems(e.target.files));
+
+wireDrop($("refdrop"), files => uploadRef(files[0]), "hot");
+$("refdrop")._picker = $("refpicker");
+$("refpicker").addEventListener("change", e => uploadRef(e.target.files[0]));
+
+$("intensity").addEventListener("input", e => $("intv").textContent = Number(e.target.value).toFixed(2));
+$("balance").addEventListener("input", e => {
+  balanceExplicit = true;
+  $("balv").textContent = Number(e.target.value).toFixed(2);
+  $("balmode").textContent = "手動覆寫";
+  sourceBalanceDefault();
+});
+function sourceBalanceDefault() {
+  if (!balanceExplicit) {
+    $("balance").value = profileDefault($("sourceprofile").value);
+    $("balv").textContent = Number($("balance").value).toFixed(2);
+    $("balmode").textContent = "來源預設";
+  }
+  $("balance-intent").textContent = balanceExplicit ? "手動拉桿優先；來源類型不會覆寫此值。" :
+    $("sourceprofile").value === "balanced_stems" ? "採用你的已平衡分組宣告，預設保留 1.00。" :
+    $("sourceprofile").value === "reference_balance" ? "需同曲、同起點，主要差在音量的粗混；只重建音量比例。pan、EQ或非線性／效果差異太大可能拒絕；未通過回退0.50，手動拉桿優先。" :
+    $("sourceprofile").value === "raw_tracks" ? "原始音軌沿用一般預設 0.50，讓風格參與平衡。" :
+    "自動：僅同曲、對齊的參考曲能重建來源總和時保留 1.00；其餘維持 0.50。不是音質判斷。";
+}
+$("sourceprofile").addEventListener("change", sourceBalanceDefault);
+$("balance-default").onclick = () => { balanceExplicit = false; sourceBalanceDefault(); };
+$("blend").addEventListener("input", e => $("blendv").textContent = Number(e.target.value).toFixed(2));
+$("reverb-amount").addEventListener("input", e => $("reverb-amount-v").textContent = e.target.value + "%");
+// Touching a control means the user means what the slider says: the exact
+// restored value stops being the one to send.
+["intensity", "balance", "blend", "reverb-amount"].forEach(id => {
+  $(id).addEventListener("input", () => { delete exactControls[id]; });
+});
+$("go").addEventListener("click", run);
+$("abmix").addEventListener("click", () => setAB("mix"));
+$("abprev").addEventListener("click", () => setAB("prev"));
+$("abraw").addEventListener("click", () => setAB("raw"));
+$("abref").addEventListener("click", () => setAB("reference"));
+
+function refreshRefButton() {
+  $("abref").classList.toggle("hide", !hasRef);
+}
+
+/* dropping anywhere on the window should work too */
+window.addEventListener("dragover", e => e.preventDefault());
+window.addEventListener("drop", e => {
+  e.preventDefault();
+  if (e.dataTransfer.files && e.dataTransfer.files.length && !e.target.closest("#refdrop")) {
+    uploadStems(e.dataTransfer.files);
+  }
+});
+
+/* ---------------------------------------- the last successful mix's controls */
+
+// The target dropdown offers three built-in values, but the API accepts any
+// explicit target.  A target outside the list is kept as an option that shows
+// its own number, and only ever one such option exists at a time.
+function setTargetControl(value) {
+  const sel = $("target");
+  sel.querySelectorAll("option[data-custom]").forEach(o => o.remove());
+  const n = Number(value);
+  if (value == null || !Number.isFinite(n)) { sel.value = ""; return; }
+  const v = String(n);
+  let opt = [...sel.options].find(o => o.value === v);
+  if (!opt) {
+    opt = document.createElement("option");
+    opt.value = v;
+    opt.dataset.custom = "1";
+    opt.textContent = `${v} LUFS（自訂）`;
+    sel.appendChild(opt);
+  }
+  sel.value = v;
+}
+
+// A known reverb amount is authoritative even without the new snapshot, and
+// the percent the slider shows is rounded -- so the amount itself is kept
+// separately, or a known 0.333 would leave as 0.33.
+function seedReverb(amount) {
+  const pct = Number((amount * 100).toFixed(3));
+  $("reverb-amount").value = String(pct);
+  $("reverb-amount-v").textContent = pct + "%";
+  exactControls["reverb-amount"] = amount;
+}
+
+// The value to send for a control: the exact restored one while the user has
+// not touched it, otherwise what the control says now.
+function controlValue(id, fallback) {
+  return Object.prototype.hasOwnProperty.call(exactControls, id) ? exactControls[id] : fallback;
+}
+
+// The request body: the exact restored value of a control the user has not
+// touched, otherwise what the control says now.
+function runBody() {
+  return JSON.stringify({
+    style,
+    intensity: controlValue("intensity", Number($("intensity").value)),
+    source_balance_profile: $("sourceprofile").value,
+    balance_preserve: balanceExplicit ? controlValue("balance", Number($("balance").value)) : null,
+    blend: controlValue("blend", Number($("blend").value)),
+    reverb_amount: controlValue("reverb-amount", Number($("reverb-amount").value) / 100),
+    target_lufs: $("target").value ? Number($("target").value) : null,
+    export_stems: $("export").checked
+  });
+}
+
+// Put the controls of the last successful mix back, showing the values the
+// user actually asked for.  A number the engine fitted (a resolved k, a
+// derived LUFS) is a result, not a choice, and is never written into a
+// control: an unset k stays unset and an empty target stays empty.
+function applySavedControls(controls, result) {
+  const hint = $("control-hint");
+  exactControls = {};
+  if (!controls) {
+    if (!result) {
+      hint.textContent = "這個工作階段沒有已儲存的混音結果，也沒有當時的設定可還原。請為下次混音選擇設定。";
+      return;
+    }
+    // a session saved before the controls were stored: say what is missing
+    // instead of pretending the current sliders are what the user picked
+    const target = result.target_lufs != null ? fmt(result.target_lufs, 1) : null;
+    hint.textContent = "這個工作階段沒有存下、或存下的設定已損壞，無法還原。" +
+      (target ? `上次結果的實際目標是 ${target} LUFS。` : "") + "請為下次混音選擇設定。";
+    return;
+  }
+  hint.textContent = "已還原上次成功混音的設定。";
+  if (controls.style && styleLibrary.some(s => s.id === controls.style)) {
+    style = controls.style;
+    document.querySelectorAll(".style").forEach(el => el.classList.toggle("sel", el.dataset.styleId === style));
+    showStyleIntent();
+  }
+  if (controls.intensity != null) {
+    $("intensity").value = String(controls.intensity);
+    $("intv").textContent = Number(controls.intensity).toFixed(2);
+    exactControls["intensity"] = controls.intensity;
+  }
+  if (controls.source_balance_profile) $("sourceprofile").value = controls.source_balance_profile;
+  if (controls.balance_preserve != null) {
+    balanceExplicit = true;
+    $("balance").value = String(controls.balance_preserve);
+    $("balv").textContent = Number(controls.balance_preserve).toFixed(2);
+    $("balmode").textContent = "手動覆寫";
+    exactControls["balance"] = controls.balance_preserve;
+  } else {
+    // an unset k stays unset: the slider goes back to the source default
+    balanceExplicit = false;
+    $("balance").value = profileDefault($("sourceprofile").value);
+    $("balv").textContent = Number($("balance").value).toFixed(2);
+    $("balmode").textContent = "來源預設";
+  }
+  if (controls.blend != null) {
+    $("blend").value = String(controls.blend);
+    $("blendv").textContent = Number(controls.blend).toFixed(2);
+    exactControls["blend"] = controls.blend;
+  }
+  setTargetControl(controls.target_lufs);
+  $("export").checked = !!controls.export_stems;
+  if (controls.reverb_amount != null) {
+    seedReverb(controls.reverb_amount);
+  }
+  refreshGo();
+}
+
+async function restore() {
+  const m = /(?:^|[#&])s=([0-9a-f]+)/.exec(location.hash || "");
+  if (!m) return;
+  const id = m[1];
+  try {
+    const st = await api(`/api/session/${id}/state`);
+    sessionId = id;
+    stems = st.stems || [];
+    mutedTracks = new Set(st.muted || []);
+    // the engine's own track id for every file: a group is declared with
+    // those ids, so the browser never has to invent one
+    trackIds = Object.assign(Object.create(null), st.track_ids || {});
+    // the declared groups come back with the session, so a reopened project
+    // shows the same grouping the user made
+    groupByTrack = Object.create(null);
+    groupPans = Object.create(null);
+    groupModes = Object.create(null);
+    groupPairLeft = Object.create(null);
+    groupPairRight = Object.create(null);
+    groupPairTrims = Object.create(null);
+    groupPairGains = Object.create(null);
+    groupSavedDecl = Object.create(null);
+    (st.capture_groups || []).forEach(g => {
+      const name = (g.id || "").trim();
+      if (!name) return;
+      const members = (g.members || []).slice();
+      groupPans[name] = Number(g.pan || 0);
+      if (g.mode === "stereo_pair") {
+        // a restored pair keeps its mode, its two sides in order and its
+        // shared trim, exactly as they were saved
+        groupModes[name] = "stereo_pair";
+        groupPairLeft[name] = members[0] || "";
+        groupPairRight[name] = members[1] || "";
+        groupPairTrims[name] = Number(g.trim_db || 0);
+        groupPairGains[name] = String(Number(g.trim_db || 0));
+        groupSavedDecl[name] = {
+          id: name, members: members, pan: Number(g.pan || 0),
+          mode: "stereo_pair", trim_db: Number(g.trim_db || 0)
+        };
+      } else {
+        groupModes[name] = "mono";
+        groupSavedDecl[name] = { id: name, members: members, pan: Number(g.pan || 0) };
+      }
+      members.forEach(t => { groupByTrack[t] = name; });
+    });
+    // the manual role choices come with the state; the detection call that
+    // fills in the rest is slow and must not be the first thing on screen
+    seedManualRoles(st.manual_roles || {}, st.role_revision);
+    hasRef = !!st.has_reference;
+    $("refdrop").classList.toggle("set", hasRef);
+    $("refdrop").textContent = hasRef ? "參考曲已儲存，拖入其他歌曲可替換" : "丟一首你喜歡的成品，讓它照那個方向混";
+    refreshRefButton();
+    renderFiles();
+    refreshGo();
+    loadRoles();
+    let result = null;
+    if (st.has_mix) {
+      result = await api(`/api/session/${id}/result`);
+      show(result, "—");
+    }
+    // the requested controls of the last successful mix win over anything the
+    // result implies: a fitted number is not a choice the user made
+    const restoredControls = st.draft_controls || st.controls;
+    applySavedControls(restoredControls, result);
+    $("project-name").value = st.project_name || "";
+    if (st.draft_controls) {
+      $("control-hint").textContent = "已還原另存專案時的設定；既有結果仍屬上次成功混音，編輯後請重新混音。";
+    }
+    if (!restoredControls || restoredControls.reverb_amount == null) {
+      // the session's own reverb amount is known even without the snapshot:
+      // seed it after the restore so the exact value is not lost to rounding
+      seedReverb(st.reverb_amount ?? 1);
+    }
+    if (st.has_mix) {
+      $("status").textContent = "已還原上一次的結果";
+    }
+    // a saved grouping we cannot vouch for is reported, never guessed at
+    if (st.capture_groups_error) {
+      const span = document.createElement("span");
+      span.className = "err";
+      span.textContent = st.capture_groups_error;
+      $("status").innerHTML = "";
+      $("status").appendChild(span);
+    }
+  } catch (e) {
+    // a stale hash (server restarted, sessions cleaned) is not an error worth
+    // shouting about -- dropping it quietly is the friendly behaviour
+    history.replaceState(null, "", location.pathname);
+  }
+}
+
+async function boot() {
+  try {
+    try {
+      const r = await api("/api/roles");
+      allRoles = r.roles || [];
+    } catch (_) { allRoles = ["other"]; }
+    await loadStyles();
+    refreshRefButton();
+    await restore();
+    try { await refreshProjects(); }
+    catch (e) { $("project-status").textContent = `無法讀取已保存專案：${e.message}`; }
+  } finally {
+    projectLoading = false;
+    setProjectBusy(false);
+  }
+}
+
+boot();
+</script>
+</body>
+</html>

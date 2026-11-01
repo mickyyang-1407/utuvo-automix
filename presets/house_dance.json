@@ -1,0 +1,73 @@
+{
+  "id": "house_dance",
+  "name": "House / Dance",
+  "description": "低頻集中、較亮較寬。",
+  "version": 1,
+  "target_lufs": -10.5,
+  "true_peak_db": -1.0,
+  "tonal_tilt_db": {
+    "low": 1.5,
+    "low_mid": -0.6,
+    "mid": -0.2,
+    "presence": 0.6,
+    "air": 0.8
+  },
+  "crest_target_db": 9,
+  "width": 1.15,
+  "reverb": {
+    "amount": 0.13,
+    "decay_s": 1.2,
+    "pre_delay_ms": 20,
+    "high_cut_hz": 8000
+  },
+  "compression": {
+    "drum": 0.45,
+    "bass": 0.35,
+    "vocal": 0.35,
+    "music": 0.35,
+    "bus": 0.3
+  },
+  "saturation": {
+    "drum": 0.18,
+    "bass": 0.15,
+    "vocal": 0.06,
+    "music": 0.1
+  },
+  "vocal_forward_db": 0.5,
+  "mono_below_hz": 140,
+  "role_gains_db": {
+    "kick": -0.5,
+    "snare": -2,
+    "hats": -6,
+    "toms": -3,
+    "cymbals": -8,
+    "drums_full": -1,
+    "bass": -1,
+    "sub_808": -0.5,
+    "lead_vocal": 0,
+    "backing_vocal": -6,
+    "guitar_electric": -6,
+    "guitar_acoustic": -7,
+    "keys": -5,
+    "piano": -5,
+    "synth": -3,
+    "pad": -5,
+    "strings": -7,
+    "brass": -7,
+    "fx": -9,
+    "other": -7
+  },
+  "guards": {
+    "max_eq_db": 6.0,
+    "max_gr_db": 6.0,
+    "min_crest_db": 7.0,
+    "max_width": 1.4,
+    "max_saturation": 0.5
+  },
+  "intent": {
+    "applicability": "適合低頻與鼓組主導的電子舞曲分組。",
+    "caveat": "沒有tempo跟隨kick pump、節拍delay或自動編排；請勿把名稱當成這些功能。",
+    "numeric_basis": "UTUVO自己調出來的起點數值，不是音質保證。",
+    "source_refs": []
+  }
+}

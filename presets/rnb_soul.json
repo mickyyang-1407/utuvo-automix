@@ -1,0 +1,73 @@
+{
+  "id": "rnb_soul",
+  "name": "R&B / Soul",
+  "description": "人聲靠前、律動溫暖。",
+  "version": 1,
+  "target_lufs": -12,
+  "true_peak_db": -1.0,
+  "tonal_tilt_db": {
+    "low": 0.8,
+    "low_mid": -0.4,
+    "mid": 0.3,
+    "presence": 0.6,
+    "air": 0.8
+  },
+  "crest_target_db": 11,
+  "width": 1.05,
+  "reverb": {
+    "amount": 0.16,
+    "decay_s": 1.8,
+    "pre_delay_ms": 35,
+    "high_cut_hz": 8000
+  },
+  "compression": {
+    "drum": 0.3,
+    "bass": 0.4,
+    "vocal": 0.45,
+    "music": 0.25,
+    "bus": 0.22
+  },
+  "saturation": {
+    "drum": 0.12,
+    "bass": 0.15,
+    "vocal": 0.06,
+    "music": 0.06
+  },
+  "vocal_forward_db": 1.5,
+  "mono_below_hz": 120,
+  "role_gains_db": {
+    "kick": -2,
+    "snare": -3,
+    "hats": -7,
+    "toms": -4,
+    "cymbals": -8,
+    "drums_full": -2,
+    "bass": -1.5,
+    "sub_808": -1,
+    "lead_vocal": 0,
+    "backing_vocal": -6,
+    "guitar_electric": -5,
+    "guitar_acoustic": -4,
+    "keys": -3.5,
+    "piano": -4,
+    "synth": -4,
+    "pad": -6,
+    "strings": -5,
+    "brass": -6,
+    "fx": -10,
+    "other": -5
+  },
+  "guards": {
+    "max_eq_db": 6.0,
+    "max_gr_db": 6.0,
+    "min_crest_db": 7.0,
+    "max_width": 1.4,
+    "max_saturation": 0.5
+  },
+  "intent": {
+    "applicability": "適合節奏與人聲並重的分組；保留伴奏支撐。",
+    "caveat": "不是特定年代、藝人或器材的重現；密集人聲需以等響度A/B確認。",
+    "numeric_basis": "UTUVO自己調出來的起點數值，不是音質保證。",
+    "source_refs": []
+  }
+}

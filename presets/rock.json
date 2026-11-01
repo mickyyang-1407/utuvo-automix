@@ -1,0 +1,67 @@
+{
+  "id": "rock",
+  "name": "Rock",
+  "description": "中頻厚、鼓有 punch、吉他寬。",
+  "version": 1,
+  "target_lufs": -10.0,
+  "true_peak_db": -1.0,
+  "tonal_tilt_db": {
+    "low": 1.0,
+    "low_mid": 0.8,
+    "mid": 1.0,
+    "presence": 1.0,
+    "air": 0.0
+  },
+  "crest_target_db": 8.5,
+  "width": 1.0,
+  "reverb": {
+    "amount": 0.12,
+    "decay_s": 1.2,
+    "pre_delay_ms": 18,
+    "high_cut_hz": 7000
+  },
+  "compression": {
+    "drum": 0.55,
+    "bass": 0.4,
+    "vocal": 0.5,
+    "music": 0.4,
+    "bus": 0.45
+  },
+  "saturation": {
+    "drum": 0.35,
+    "bass": 0.25,
+    "vocal": 0.15,
+    "music": 0.2
+  },
+  "vocal_forward_db": 1.0,
+  "mono_below_hz": 110,
+  "role_gains_db": {
+    "kick": -1.0,
+    "snare": -2.0,
+    "hats": -8.0,
+    "toms": -4.0,
+    "cymbals": -9.0,
+    "drums_full": -2.0,
+    "bass": -2.0,
+    "sub_808": -1.0,
+    "lead_vocal": 0.0,
+    "backing_vocal": -6.0,
+    "guitar_electric": -3.0,
+    "guitar_acoustic": -5.0,
+    "keys": -6.0,
+    "piano": -5.0,
+    "synth": -6.0,
+    "pad": -10.0,
+    "strings": -8.0,
+    "brass": -7.0,
+    "fx": -12.0,
+    "other": -10.0
+  },
+  "guards": {
+    "max_eq_db": 6.0,
+    "max_gr_db": 6.0,
+    "min_crest_db": 7.0,
+    "max_width": 1.4,
+    "max_saturation": 0.5
+  }
+}

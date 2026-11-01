@@ -1,0 +1,3 @@
+# credscan false positives (bound to file content sha256)
+74c1b62fc3d7efe0772a1e3c3bf3bcc84626de2ad1f8fc15c8c020d6a880935c  # app/automix/reference_balance.py: numpy matrix-multiply operator read as an email
+babdfee492e3dcf0eb567354a96595bbc30060cf5bd0a15f02f2261ae2b6487a  # app/demo_stems/vocal_lead.wav: synthetic audio bytes read as an email

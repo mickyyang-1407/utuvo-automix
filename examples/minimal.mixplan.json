@@ -1,0 +1,213 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-10-28T15:00:00+08:00",
+  "source": {
+    "sample_rate": 48000,
+    "duration_s": 180.0,
+    "stems": [
+      {
+        "id": "s1",
+        "file": "vocals.wav",
+        "role": "lead_vocal",
+        "confidence": 0.94
+      },
+      {
+        "id": "s2",
+        "file": "kick.wav",
+        "role": "kick",
+        "confidence": 0.96
+      },
+      {
+        "id": "s3",
+        "file": "bass.wav",
+        "role": "bass",
+        "confidence": 0.91
+      }
+    ]
+  },
+  "style": {
+    "id": "pop_2020s",
+    "version": 1,
+    "intensity": 0.65
+  },
+  "tracks": [
+    {
+      "id": "s1",
+      "role": "lead_vocal",
+      "gain_db": -2.4,
+      "pan": 0.0,
+      "hpf_hz": 90,
+      "eq": [
+        {
+          "type": "bell",
+          "freq": 2800,
+          "gain_db": -2.8,
+          "q": 1.1
+        }
+      ],
+      "comp": {
+        "threshold_db": -18,
+        "ratio": 3.0,
+        "attack_ms": 8,
+        "release_ms": 120,
+        "makeup_db": 2.0,
+        "mix": 1.0
+      },
+      "saturation": 0.1,
+      "sends": {
+        "plate": 0.18,
+        "room": 0.0,
+        "delay": 0.0
+      },
+      "width": 1.0,
+      "evidence": [
+        "2-5 kHz LTAS +3.2 dB vs target"
+      ],
+      "confidence": 0.82
+    },
+    {
+      "id": "s2",
+      "role": "kick",
+      "gain_db": -3.0,
+      "pan": 0.0,
+      "hpf_hz": 30,
+      "eq": [
+        {
+          "type": "bell",
+          "freq": 60,
+          "gain_db": 1.5,
+          "q": 1.0
+        }
+      ],
+      "comp": {
+        "threshold_db": -16,
+        "ratio": 3.5,
+        "attack_ms": 6,
+        "release_ms": 100,
+        "makeup_db": 1.5,
+        "mix": 1.0
+      },
+      "saturation": 0.25,
+      "sends": {
+        "plate": 0.0,
+        "room": 0.08,
+        "delay": 0.0
+      },
+      "width": 1.0,
+      "evidence": [
+        "parallel blend 18%"
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "s3",
+      "role": "bass",
+      "gain_db": -2.0,
+      "pan": 0.0,
+      "hpf_hz": 20,
+      "eq": [],
+      "comp": {
+        "threshold_db": -20,
+        "ratio": 2.5,
+        "attack_ms": 18,
+        "release_ms": 140,
+        "makeup_db": 1.0,
+        "mix": 1.0
+      },
+      "saturation": 0.2,
+      "sends": {
+        "plate": 0.0,
+        "room": 0.0,
+        "delay": 0.0
+      },
+      "width": 0.0,
+      "evidence": [
+        "mono below 120 Hz"
+      ],
+      "confidence": 0.88
+    }
+  ],
+  "buses": {
+    "drum": {
+      "eq": [],
+      "comp": {
+        "threshold_db": -14,
+        "ratio": 2.0,
+        "attack_ms": 20,
+        "release_ms": 150,
+        "knee_db": 6,
+        "makeup_db": 0.0,
+        "mix": 1.0
+      },
+      "saturation": 0.2,
+      "width": 1.0
+    },
+    "bass": {
+      "eq": [],
+      "comp": {
+        "threshold_db": -18,
+        "ratio": 2.0,
+        "attack_ms": 25,
+        "release_ms": 180,
+        "knee_db": 6,
+        "makeup_db": 0.0,
+        "mix": 1.0
+      },
+      "saturation": 0.1,
+      "width": 0.0
+    },
+    "music": {
+      "eq": [],
+      "comp": {
+        "threshold_db": -20,
+        "ratio": 1.5,
+        "attack_ms": 30,
+        "release_ms": 200,
+        "knee_db": 6,
+        "makeup_db": 0.0,
+        "mix": 1.0
+      },
+      "saturation": 0.1,
+      "width": 1.0
+    },
+    "vocal": {
+      "eq": [],
+      "comp": {
+        "threshold_db": -18,
+        "ratio": 2.0,
+        "attack_ms": 15,
+        "release_ms": 120,
+        "knee_db": 6,
+        "makeup_db": 0.0,
+        "mix": 1.0
+      },
+      "saturation": 0.05,
+      "width": 1.0
+    },
+    "fx": {
+      "eq": [],
+      "saturation": 0.0,
+      "width": 1.0
+    },
+    "master": {
+      "eq": [],
+      "comp": {
+        "threshold_db": -12,
+        "ratio": 1.5,
+        "attack_ms": 30,
+        "release_ms": 200,
+        "knee_db": 6,
+        "makeup_db": 0.0,
+        "mix": 1.0
+      },
+      "limiter": {
+        "ceiling_db": -1.0,
+        "lookahead_ms": 5,
+        "release_ms": 80
+      },
+      "target_lufs": -10.5,
+      "true_peak_db": -1.0
+    }
+  },
+  "warnings": []
+}

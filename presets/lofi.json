@@ -1,0 +1,67 @@
+{
+  "id": "lofi",
+  "name": "Lo-fi",
+  "description": "暖、窄、復古；高頻收斂。",
+  "version": 1,
+  "target_lufs": -12.0,
+  "true_peak_db": -1.0,
+  "tonal_tilt_db": {
+    "low": 0.5,
+    "low_mid": 0.8,
+    "mid": 0.0,
+    "presence": -1.5,
+    "air": -3.0
+  },
+  "crest_target_db": 10.0,
+  "width": 0.85,
+  "reverb": {
+    "amount": 0.15,
+    "decay_s": 1.0,
+    "pre_delay_ms": 18,
+    "high_cut_hz": 5000
+  },
+  "compression": {
+    "drum": 0.3,
+    "bass": 0.25,
+    "vocal": 0.35,
+    "music": 0.25,
+    "bus": 0.25
+  },
+  "saturation": {
+    "drum": 0.35,
+    "bass": 0.3,
+    "vocal": 0.2,
+    "music": 0.25
+  },
+  "vocal_forward_db": 1.0,
+  "mono_below_hz": 140,
+  "role_gains_db": {
+    "kick": -2.0,
+    "snare": -3.0,
+    "hats": -10.0,
+    "toms": -4.0,
+    "cymbals": -12.0,
+    "drums_full": -2.0,
+    "bass": -3.0,
+    "sub_808": -1.0,
+    "lead_vocal": 0.0,
+    "backing_vocal": -6.0,
+    "guitar_electric": -5.0,
+    "guitar_acoustic": -5.0,
+    "keys": -6.0,
+    "piano": -5.0,
+    "synth": -6.0,
+    "pad": -11.0,
+    "strings": -8.0,
+    "brass": -7.0,
+    "fx": -12.0,
+    "other": -10.0
+  },
+  "guards": {
+    "max_eq_db": 6.0,
+    "max_gr_db": 6.0,
+    "min_crest_db": 7.0,
+    "max_width": 1.4,
+    "max_saturation": 0.5
+  }
+}

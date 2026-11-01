@@ -1,0 +1,73 @@
+{
+  "id": "ambient_space",
+  "name": "Ambient / Space",
+  "description": "長空間、較寬、輕動態處理。",
+  "version": 1,
+  "target_lufs": -17,
+  "true_peak_db": -1.0,
+  "tonal_tilt_db": {
+    "low": 0.5,
+    "low_mid": 0,
+    "mid": -0.3,
+    "presence": -0.6,
+    "air": 0.8
+  },
+  "crest_target_db": 15,
+  "width": 1.25,
+  "reverb": {
+    "amount": 0.32,
+    "decay_s": 3.5,
+    "pre_delay_ms": 40,
+    "high_cut_hz": 7500
+  },
+  "compression": {
+    "drum": 0.08,
+    "bass": 0.1,
+    "vocal": 0.12,
+    "music": 0.08,
+    "bus": 0.04
+  },
+  "saturation": {
+    "drum": 0,
+    "bass": 0.01,
+    "vocal": 0,
+    "music": 0.01
+  },
+  "vocal_forward_db": 0,
+  "mono_below_hz": 80,
+  "role_gains_db": {
+    "kick": -5,
+    "snare": -6,
+    "hats": -10,
+    "toms": -6,
+    "cymbals": -10,
+    "drums_full": -5,
+    "bass": -4,
+    "sub_808": -4,
+    "lead_vocal": 0,
+    "backing_vocal": -5,
+    "guitar_electric": -5,
+    "guitar_acoustic": -4,
+    "keys": -3,
+    "piano": -4,
+    "synth": -3,
+    "pad": -2,
+    "strings": -2,
+    "brass": -6,
+    "fx": -7,
+    "other": -3
+  },
+  "guards": {
+    "max_eq_db": 6.0,
+    "max_gr_db": 6.0,
+    "min_crest_db": 7.0,
+    "max_width": 1.4,
+    "max_saturation": 0.5
+  },
+  "intent": {
+    "applicability": "適合持續音、pad與strings的空間層次起點。",
+    "caveat": "只有既有共享convolution return與寬度處理；沒有shimmer、granular或自適應空間。",
+    "numeric_basis": "UTUVO自己調出來的起點數值，不是音質保證。",
+    "source_refs": []
+  }
+}
