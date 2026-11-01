@@ -26,6 +26,7 @@
   #drop .big{font-size:16px;margin-bottom:6px}
   #drop .hint{color:var(--dim);font-size:13px}
   .ctl .hint{color:var(--dim);font-size:12px;line-height:1.5;margin-top:4px}
+  #project-root,#project-status{overflow-wrap:anywhere}
   #control-hint{color:var(--dim);font-size:12px;line-height:1.5;margin-top:4px}
   .files{margin-top:14px;display:flex;flex-direction:column;gap:6px}
   .file{display:flex;align-items:center;gap:12px;font-size:13px;
@@ -160,6 +161,9 @@
         vertical-align:-2px;margin-right:7px}
   @keyframes s{to{transform:rotate(360deg)}}
   footer{color:var(--dim);font-size:12px;margin-top:26px;text-align:center}
+  .lang{margin-left:auto;display:flex;align-items:center;gap:4px;font-size:12px;color:var(--dim)}
+  .lang button{padding:3px 9px;font-size:12px;border-radius:7px;background:transparent;color:var(--dim)}
+  .lang button.on{border-color:var(--accent);color:var(--accent)}
 </style>
 </head>
 <body>
@@ -167,6 +171,9 @@
   <header>
     <h1>Automix</h1>
     <span class="sub">丟分軌 → 選風格 → 拿混音（本機執行，不上傳雲端）</span>
+    <span class="lang" role="group" aria-label="語言">
+      <button type="button" id="lang-en" lang="en">EN</button><span aria-hidden="true">|</span><button type="button" id="lang-zh" lang="zh-Hant">繁中</button>
+    </span>
   </header>
 
   <div class="card">
@@ -305,6 +312,178 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+
+/* --------------------------------------------------------------- language */
+// English is the default; a browser whose language starts with "zh" starts
+// in Traditional Chinese, and the header toggle remembers the choice.  Every
+// user-visible string carries both texts as L(zh, en).  Values sent to or
+// compared with the server never go through L.
+const LANG_KEY = "automix.lang";
+const LANG = (() => {
+  const loc = typeof location !== "undefined" ? location : null;
+  const fromUrl = /[?&]lang=(zh|en)(?:&|$)/.exec((loc && loc.search) || "");
+  if (fromUrl) return fromUrl[1];
+  try {
+    const saved = localStorage.getItem(LANG_KEY);
+    if (saved === "zh" || saved === "en") return saved;
+  } catch (_) {}
+  const nav = typeof navigator !== "undefined" ? navigator : null;
+  const pref = (nav && (nav.language || (nav.languages || [])[0])) || "";
+  return /^zh/i.test(pref) ? "zh" : "en";
+})();
+const L = (zh, en) => (LANG === "zh" ? zh : en);
+
+// The static page is written in Chinese; in English its text nodes and the
+// placeholder / title / aria-label attributes are looked up here.  The key is
+// the text with its whitespace collapsed.
+const STATIC_EN = {
+  "Automix — 丟分軌，拿混音": "Automix — drop stems, get a mix",
+  "丟分軌 → 選風格 → 拿混音（本機執行，不上傳雲端）": "Drop stems → pick a style → get a mix (runs on this machine; nothing is uploaded to the cloud)",
+  "語言": "Language",
+  "本機專案": "Local projects",
+  "專案名稱": "Project name",
+  "未命名專案": "Untitled project",
+  "另存專案": "Save project",
+  "已保存的專案": "Saved projects",
+  "尚無已保存專案": "No saved projects yet",
+  "開啟專案": "Open project",
+  "工作階段可能在 12 小時後或超過 40 個時被清理。另存的專案副本會保留素材、設定與結果；開啟時建立新的工作副本。後續編輯請再次另存。":
+    "Sessions may be cleaned up after 12 hours or once there are more than 40. A saved project copy keeps the audio, settings and results; opening it creates a new working copy. Save again after further edits.",
+  "1 · 分軌": "1 · Stems",
+  "把分軌拖進來": "Drop your stems here",
+  "或點一下選檔案（可多選；WAV / AIFF / FLAC / MP3）": "or click to choose files (several at once; WAV / AIFF / FLAC / MP3)",
+  "處理時間隨曲長、軌數與來源格式而變。": "Processing time depends on song length, track count and source format.",
+  "麥克風群組": "Mic groups",
+  "：同一個來源、由多支麥克風錄到的檔案，填上一樣的名稱。 混音時會在共用總線／母帶之前，保留它們匯入時的時間、相位與波形關係。":
+    ": give files of the same source, recorded by several mics, the same name. The mix keeps their imported timing, phase and waveform relationship up to the shared bus / master.",
+  "不會自動對齊、不會翻轉極性、也不會消除串音；共用總線／母帶仍會改變成品。":
+    "It does not auto-align, flip polarity or remove bleed; the shared bus / master still changes the result.",
+  "只支援單聲道或左右相同的雙單聲道檔案；立體聲也可能只錄到同一個來源，但這個版本先不支援成群。":
+    "Only mono or dual-mono (identical L/R) files are supported. A stereo file can also hold a single source, but this version cannot group stereo files yet.",
+  "2 · 風格": "2 · Style",
+  "目標響度": "Target loudness",
+  "同時匯出處理後分軌（給 DAW，約": "Also export processed stems (for your DAW, about",
+  "）": ")",
+  "沿用風格": "Style default",
+  "−14 LUFS（串流）": "−14 LUFS (streaming)",
+  "−11 LUFS（較響）": "−11 LUFS (louder)",
+  "−9 LUFS（俱樂部）": "−9 LUFS (club)",
+  "風格強度": "Style intensity",
+  "新增殘響量": "Added reverb",
+  "0% 保留原音檔本身的空間，只關閉本工具新增的殘響。": "0% keeps the room already in your files and only turns off the reverb this tool adds.",
+  "來源平衡": "Source balance",
+  "自動判斷": "Auto-detect",
+  "已平衡分組": "Balanced stems",
+  "原始音軌": "Raw tracks",
+  "同曲粗混平衡": "Rough mix of this song",
+  "保留原始平衡": "Keep source balance",
+  "來源預設": "Source default",
+  "回到來源預設": "Back to source default",
+  "自動：同曲、對齊的參考曲能重建來源總和時保留 1.00；其餘維持 0.50。手動拉桿優先，不是音質判斷。":
+    "Auto: keeps 1.00 when an aligned reference of the same song can rebuild the source sum; otherwise 0.50. The manual slider wins. This is not a sound-quality judgement.",
+  "3 · 參考曲（選用）": "3 · Reference (optional)",
+  "丟一首你喜歡的成品，讓它照那個方向混": "Drop in a finished track you like and the mix will lean that way",
+  "參考曲比重": "Reference weight",
+  "開始混音": "Start mix",
+  "取消": "Cancel",
+  "結果": "Result",
+  "混音後": "Mix",
+  "原始總和": "Raw sum",
+  "上一個風格": "Previous style",
+  "參考曲": "Reference",
+  "下載 mix.wav": "Download mix.wav",
+  "看 mixplan.json": "View mixplan.json",
+  "看 report.md": "View report.md",
+  "引擎與 CLI 共用同一套決策；這裡只是外殼。": "The engine and the CLI make the same decisions; this page is only a shell."
+};
+
+// The English text of a known style, or null (Chinese, or an unknown id).
+// (the presets are written in Chinese; /api/styles carries their English text)
+function styleEn(id) {
+  const item = LANG === "en" && id ? styleLibrary.find(s => s.id === id) : null;
+  return item && item.en ? item.en : null;
+}
+
+function translateStatic() {
+  if (document.documentElement) document.documentElement.lang = L("zh-Hant", "en");
+  ["en", "zh"].forEach(lang => {
+    const b = $("lang-" + lang);
+    if (b && b.classList) b.classList.toggle("on", lang === LANG);
+  });
+  if (LANG === "zh") return;
+  const en = text => {
+    const key = String(text || "").replace(/\s+/g, " ").trim();
+    return Object.prototype.hasOwnProperty.call(STATIC_EN, key) ? STATIC_EN[key] : null;
+  };
+  if (en(document.title) != null) document.title = en(document.title);
+  if (typeof document.createTreeWalker !== "function" || !document.body) return;
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) {
+    const parent = walker.currentNode.parentNode;
+    if (parent && /^(SCRIPT|STYLE)$/.test(parent.nodeName)) continue;
+    nodes.push(walker.currentNode);
+  }
+  nodes.forEach(node => {
+    const text = en(node.nodeValue);
+    if (text == null) return;
+    const lead = /^\s*/.exec(node.nodeValue)[0];
+    const tail = /\s*$/.exec(node.nodeValue)[0];
+    node.nodeValue = lead + text + tail;
+  });
+  document.querySelectorAll("[placeholder],[title],[aria-label]").forEach(el => {
+    ["placeholder", "title", "aria-label"].forEach(attr => {
+      const text = el.hasAttribute(attr) ? en(el.getAttribute(attr)) : null;
+      if (text != null) el.setAttribute(attr, text);
+    });
+  });
+}
+translateStatic();
+
+// Switching reloads the page: every message is built in one language.  The
+// current session is kept in the URL hash, so the reload restores it the way
+// any reload does.
+let languageSwitching = false;
+async function setLanguage(lang) {
+  if (lang === LANG || languageSwitching) return;
+  const busy = () => projectBusy || importsInProgress || document.body.classList.contains("busy");
+  const waitText = () => L("請等匯入或混音完成，再切換語言。",
+    "Wait for the import or mix to finish before switching language.");
+  if (busy()) { $("status").textContent = waitText(); return; }
+  // the reload restores groups from the server only, so a group the server
+  // cannot hold yet (an unfinished pair, a one-member group) would be lost
+  const problem = typeof groupProblemText === "function" ? groupProblemText() : "";
+  if (problem) {
+    $("status").textContent = L("群組設定還沒完成，切換語言會遺失它：", "Finish this group first; switching language would lose it: ") + problem;
+    return;
+  }
+  languageSwitching = true;
+  try {
+    if (sessionId) {
+      try { await settleProjectEdits(); }
+      catch (e) {
+        $("status").textContent = L(`無法切換語言：${e.message}`, `Could not switch language: ${e.message}`);
+        return;
+      }
+    }
+    if (busy()) { $("status").textContent = waitText(); return; }
+    let stored = false;
+    try { localStorage.setItem(LANG_KEY, lang); stored = true; } catch (_) {}
+    let search = location.search || "";
+    if (!stored || /[?&]lang=/.test(search)) {
+      // no storage (or a ?lang= that would win over it): the URL carries it
+      search = /[?&]lang=[^&]*/.test(search)
+        ? search.replace(/([?&])lang=[^&]*/, "$1lang=" + lang)
+        : (search ? search + "&" : "?") + "lang=" + lang;
+    }
+    let hash = location.hash || "";
+    if (sessionId && !/(?:^|[#&])s=/.test(hash)) hash = "#s=" + sessionId;
+    try { history.replaceState(null, "", location.pathname + search + hash); } catch (_) {}
+    location.reload();
+  } finally { languageSwitching = false; }
+}
+$("lang-en").addEventListener("click", () => setLanguage("en"));
+$("lang-zh").addEventListener("click", () => setLanguage("zh"));
 let sessionId = null;
 let style = "pop_2020s";
 let styleLibrary = [];
@@ -357,7 +536,8 @@ async function refreshProjects(selected = "") {
   list.replaceChildren();
   const placeholder = document.createElement("option");
   placeholder.value = "";
-  placeholder.textContent = response.projects.length ? "選擇已保存專案" : "尚無已保存專案";
+  placeholder.textContent = response.projects.length
+    ? L("選擇已保存專案", "Choose a saved project") : L("尚無已保存專案", "No saved projects yet");
   list.appendChild(placeholder);
   response.projects.forEach(project => {
     const option = document.createElement("option");
@@ -366,14 +546,14 @@ async function refreshProjects(selected = "") {
     list.appendChild(option);
   });
   list.value = selected;
-  $("project-root").textContent = `另存位置：${response.root}`;
+  $("project-root").textContent = L(`另存位置：${response.root}`, `Projects are saved in: ${response.root}`);
   $("open-project").disabled = projectBusy || projectLoading || !list.value;
 }
 
 async function settleProjectEdits(saveCurrentGroups = true) {
   while (pendingEdits.size) await Promise.all([...pendingEdits]);
   if (saveCurrentGroups) {
-    if (!await saveGroups()) throw new Error("群組設定尚未保存，請修正後再試");
+    if (!await saveGroups()) throw new Error(L("群組設定尚未保存，請修正後再試", "Group settings are not saved yet; fix them and try again"));
   } else { await groupSaveQueue; }
   while (pendingEdits.size) await Promise.all([...pendingEdits]);
 }
@@ -381,11 +561,12 @@ async function settleProjectEdits(saveCurrentGroups = true) {
 function projectActionReady() {
   if (projectBusy) return false;
   if (projectLoading) {
-    $("project-status").textContent = "工作階段仍在載入，請稍後再試。";
+    $("project-status").textContent = L("工作階段仍在載入，請稍後再試。", "The session is still loading; try again in a moment.");
     return false;
   }
   if (importsInProgress || document.body.classList.contains("busy")) {
-    $("project-status").textContent = "請先等匯入或混音完成，再保存／開啟專案。";
+    $("project-status").textContent = L("請先等匯入或混音完成，再保存／開啟專案。",
+      "Wait for the import or mix to finish before saving or opening a project.");
     return false;
   }
   return true;
@@ -394,23 +575,23 @@ function projectActionReady() {
 async function saveProject() {
   if (!projectActionReady()) return;
   if (!sessionId || !stems.length) {
-    $("project-status").textContent = "請先匯入分軌，再另存專案。";
+    $("project-status").textContent = L("請先匯入分軌，再另存專案。", "Import stems before saving a project.");
     return;
   }
   setProjectBusy(true);
-  $("project-status").textContent = "正在保存專案副本…";
+  $("project-status").textContent = L("正在保存專案副本…", "Saving a project copy…");
   try {
     await settleProjectEdits();
     const saved = await api(`/api/session/${sessionId}/project`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: $("project-name").value, controls: JSON.parse(runBody()) })
+      body: JSON.stringify({ name: $("project-name").value.trim() || L("未命名專案", "Untitled project"), controls: JSON.parse(runBody()) })
     });
     $("project-name").value = saved.name;
-    $("project-status").textContent = `已另存「${saved.name}」：${saved.path}`;
+    $("project-status").textContent = L(`已另存「${saved.name}」：${saved.path}`, `Saved “${saved.name}” to ${saved.path}`);
     try { await refreshProjects(saved.id); }
-    catch (e) { $("project-status").textContent += `；列表暫時無法更新：${e.message}`; }
+    catch (e) { $("project-status").textContent += L(`；列表暫時無法更新：${e.message}`, `; the project list could not be refreshed: ${e.message}`); }
   } catch (e) {
-    $("project-status").textContent = `另存失敗：${e.message}`;
+    $("project-status").textContent = L(`另存失敗：${e.message}`, `Save failed: ${e.message}`);
   } finally { setProjectBusy(false); }
 }
 
@@ -418,7 +599,7 @@ async function openProject() {
   if (!projectActionReady() || !$("saved-projects").value) return;
   const id = $("saved-projects").value;
   setProjectBusy(true);
-  $("project-status").textContent = "正在建立專案工作副本…";
+  $("project-status").textContent = L("正在建立專案工作副本…", "Creating a working copy of the project…");
   try {
     await settleProjectEdits(false);
     const opened = await api(`/api/projects/${id}/open`, { method: "POST", body: "" });
@@ -426,7 +607,7 @@ async function openProject() {
     history.replaceState(null, "", location.pathname + location.search + "#s=" + opened.id);
     location.reload();
   } catch (e) {
-    $("project-status").textContent = `開啟失敗：${e.message}`;
+    $("project-status").textContent = L(`開啟失敗：${e.message}`, `Could not open the project: ${e.message}`);
     setProjectBusy(false);
   }
 }
@@ -441,19 +622,22 @@ $("saved-projects").addEventListener("change", () => {
 function showStyleIntent(savedStyle = null) {
   const item = styleLibrary.find(s => s.id === style) || savedStyle || {};
   const intent = (savedStyle && savedStyle.intent) || item.intent || {};
+  const en = styleEn(item.id);
   const box = $("style-info");
   box.replaceChildren();
   function line(label, text) {
     if (!text) return;
     const p = document.createElement("p");
     const strong = document.createElement("strong");
-    strong.textContent = label + "：";
+    strong.textContent = label + L("：", ": ");
     p.append(strong, document.createTextNode(text));
     box.appendChild(p);
   }
-  line("適用", intent.applicability || item.description);
-  line("限制", intent.caveat);
-  line("數值", intent.numeric_basis || "UTUVO自己調出來的起點數值，不是音質保證。");
+  line(L("適用", "Good for"), (en && en.applicability) || intent.applicability ||
+    (en && en.description) || item.description);
+  line(L("限制", "Limits"), (en && en.caveat) || intent.caveat);
+  line(L("數值", "Values"), (en && en.numeric_basis) || intent.numeric_basis ||
+    L("UTUVO自己調出來的起點數值，不是音質保證。", "Starting values tuned by UTUVO; not a guarantee of sound quality."));
 }
 async function loadStyles() {
   const { styles } = await api("/api/styles");
@@ -465,7 +649,8 @@ async function loadStyles() {
     el.dataset.styleId = s.id;
     el.innerHTML = `<div class="n"></div><div class="d"></div>`;
     el.querySelector(".n").textContent = s.name;
-    el.querySelector(".d").textContent = s.description || "";
+    const en = styleEn(s.id);
+    el.querySelector(".d").textContent = (en && en.description) || s.description || "";
     el.onclick = () => {
       document.querySelectorAll(".style").forEach(n => n.classList.remove("sel"));
       el.classList.add("sel");
@@ -485,7 +670,8 @@ async function uploadStems(fileList) {
   const files = [...fileList].filter(f => /\.(wav|aif|aiff|flac|mp3|m4a|ogg|opus)$/i.test(f.name));
   if (!files.length) return;
   importsInProgress++;
-  $("status").textContent = `上傳 ${files.length} 個檔案…`;
+  $("status").textContent = L(`上傳 ${files.length} 個檔案…`,
+    `Uploading ${files.length} file${files.length === 1 ? "" : "s"}…`);
   try {
     await ensureSession();
     for (const f of files) {
@@ -502,11 +688,12 @@ async function uploadStems(fileList) {
       stems = r.stems;
       renderFiles();
     }
-    $("status").textContent = `${stems.length} 軌就緒`;
+    $("status").textContent = L(`${stems.length} 軌就緒`,
+      `${stems.length} stem${stems.length === 1 ? "" : "s"} ready`);
     $("result").classList.add("hide");
     loadRoles();
   } catch (e) {
-    $("status").innerHTML = `<span class="err">上傳失敗：${e.message}</span>`;
+    $("status").innerHTML = `<span class="err">${L("上傳失敗：", "Upload failed: ")}${e.message}</span>`;
   } finally { importsInProgress--; }
   refreshGo();
 }
@@ -671,26 +858,34 @@ function sameDeclaration(a, b) {
   return true;
 }
 
+// The group checks below are also run on their own, outside the page (by
+// the tests): with no language helper around, their text stays Chinese.
+function groupL(zh, en) { return typeof L === "function" ? L(zh, en) : zh; }
+
 // What can be wrong with a same-source group.  These are the reasons it has
 // always had.
 function monoGroupProblem(name, members) {
   if (members.length < 2) {
-    return `麥克風群組「${name}」只有 ${members.length} 軌：至少要有兩支麥克風的檔案，才能保留它們之間的關係。`;
+    return groupL(`麥克風群組「${name}」只有 ${members.length} 軌：至少要有兩支麥克風的檔案，才能保留它們之間的關係。`,
+      `Mic group “${name}” has only ${members.length} track${members.length === 1 ? "" : "s"}: it needs files from at least two mics to keep the relationship between them.`);
   }
   const excluded = members.filter(t => mutedTracks.has(t));
   if (excluded.length) {
-    return `麥克風群組「${name}」有成員被排除（${excluded.map(fileNameOf).join("、")}）：請先把它納入混音，或從群組移除。`;
+    return groupL(`麥克風群組「${name}」有成員被排除（${excluded.map(fileNameOf).join("、")}）：請先把它納入混音，或從群組移除。`,
+      `Mic group “${name}” has excluded members (${excluded.map(fileNameOf).join(", ")}): include them in the mix again, or remove them from the group.`);
   }
   const gone = members.filter(t => !stems.some(n => tidOf(n) === t));
   if (gone.length) {
-    return `麥克風群組「${name}」的成員檔案已不在這次混音裡（${gone.map(fileNameOf).join("、")}）：請移除群組或加回檔案。`;
+    return groupL(`麥克風群組「${name}」的成員檔案已不在這次混音裡（${gone.map(fileNameOf).join("、")}）：請移除群組或加回檔案。`,
+      `Mic group “${name}” has member files that are no longer in this mix (${gone.map(fileNameOf).join(", ")}): remove the group or add the files back.`);
   }
   const roles = [...new Set(members.map(t => {
     const n = stems.find(n => tidOf(n) === t);
     return n ? ((roleInfo[n] || {}).role || "") : "";
   }).filter(Boolean))];
   if (roles.length > 1) {
-    return `麥克風群組「${name}」的成員角色不一致（${roles.join("、")}）：同一個群組必須是同一種角色。`;
+    return groupL(`麥克風群組「${name}」的成員角色不一致（${roles.join("、")}）：同一個群組必須是同一種角色。`,
+      `Mic group “${name}” has members with different roles (${roles.join(", ")}): every track in a group must have the same role.`);
   }
   return "";
 }
@@ -700,44 +895,55 @@ function monoGroupProblem(name, members) {
 // not say.
 function pairGroupProblem(name, members) {
   if (members.length > 2) {
-    return `立體聲配對「${name}」有 ${members.length} 個成員：配對只有兩軌（左聲道與右聲道），請先把多出來的成員移出這個群組。`;
+    return groupL(`立體聲配對「${name}」有 ${members.length} 個成員：配對只有兩軌（左聲道與右聲道），請先把多出來的成員移出這個群組。`,
+      `Stereo pair “${name}” has ${members.length} members: a pair is exactly two tracks (left and right). Move the extra members out of this group first.`);
   }
   if (members.length < 2) {
-    return `立體聲配對「${name}」只有 ${members.length} 個成員：配對需要兩軌，把兩支檔案填上同一個群組名稱，再指定左右聲道。`;
+    return groupL(`立體聲配對「${name}」只有 ${members.length} 個成員：配對需要兩軌，把兩支檔案填上同一個群組名稱，再指定左右聲道。`,
+      `Stereo pair “${name}” has only ${members.length} member${members.length === 1 ? "" : "s"}: a pair needs two tracks. Give both files the same group name, then assign left and right.`);
   }
   const left = groupPairLeft[name] || "";
   const right = groupPairRight[name] || "";
   if (!left || !right) {
-    const missing = !left && !right ? "左聲道與右聲道" : (!left ? "左聲道" : "右聲道");
-    return `立體聲配對「${name}」還沒有指定${missing}：請先選好左右聲道，這個配對才會生效。`;
+    const missing = !left && !right ? groupL("左聲道與右聲道", "left and right channels")
+      : (!left ? groupL("左聲道", "left channel") : groupL("右聲道", "right channel"));
+    return groupL(`立體聲配對「${name}」還沒有指定${missing}：請先選好左右聲道，這個配對才會生效。`,
+      `Stereo pair “${name}” has no ${missing} assigned yet: choose left and right before the pair can take effect.`);
   }
   if (left === right) {
-    return `立體聲配對「${name}」的左右聲道是同一軌（${fileNameOf(left)}）：左聲道與右聲道必須是兩條不同的軌。`;
+    return groupL(`立體聲配對「${name}」的左右聲道是同一軌（${fileNameOf(left)}）：左聲道與右聲道必須是兩條不同的軌。`,
+      `Stereo pair “${name}” uses the same track for left and right (${fileNameOf(left)}): left and right must be two different tracks.`);
   }
   const gone = [left, right].filter(t => !stems.some(n => tidOf(n) === t));
   if (gone.length) {
-    return `立體聲配對「${name}」指定的聲道檔案已不在這次混音裡（${gone.map(fileNameOf).join("、")}）：請重新指定左右聲道。`;
+    return groupL(`立體聲配對「${name}」指定的聲道檔案已不在這次混音裡（${gone.map(fileNameOf).join("、")}）：請重新指定左右聲道。`,
+      `Stereo pair “${name}”: the assigned channel files are no longer in this mix (${gone.map(fileNameOf).join(", ")}). Assign left and right again.`);
   }
   const stale = [left, right].filter(t => !members.includes(t));
   if (stale.length) {
-    return `立體聲配對「${name}」指定的聲道（${stale.map(fileNameOf).join("、")}）已經不在這個群組裡：請重新指定左右聲道。`;
+    return groupL(`立體聲配對「${name}」指定的聲道（${stale.map(fileNameOf).join("、")}）已經不在這個群組裡：請重新指定左右聲道。`,
+      `Stereo pair “${name}”: the assigned channels (${stale.map(fileNameOf).join(", ")}) are no longer in this group. Assign left and right again.`);
   }
   const excluded = [left, right].filter(t => mutedTracks.has(t));
   if (excluded.length) {
-    return `立體聲配對「${name}」的聲道被排除（${excluded.map(fileNameOf).join("、")}）：請先把它納入混音，或從群組移除。`;
+    return groupL(`立體聲配對「${name}」的聲道被排除（${excluded.map(fileNameOf).join("、")}）：請先把它納入混音，或從群組移除。`,
+      `Stereo pair “${name}” has an excluded channel (${excluded.map(fileNameOf).join(", ")}): include it in the mix again, or remove it from the group.`);
   }
   const pair = pairState(name);
   if (pair && !pair.valid) {
-    const shown = pair.text === "" ? "（空白）" : pair.text;
-    return `立體聲配對「${name}」的配對增益現在是 ${shown}：必須是 −12..12 之間的數字。` +
-      "改成有效的數字之前，這個配對不會送出，伺服器仍保留先前的宣告。";
+    const shown = pair.text === "" ? groupL("（空白）", "(empty)") : pair.text;
+    return groupL(`立體聲配對「${name}」的配對增益現在是 ${shown}：必須是 −12..12 之間的數字。` +
+      "改成有效的數字之前，這個配對不會送出，伺服器仍保留先前的宣告。",
+      `Stereo pair “${name}” has a pair gain of ${shown}: it must be a number from −12 to 12. ` +
+      "Until it is valid, this pair is not sent and the server keeps the previous declaration.");
   }
   const roles = [...new Set([left, right].map(t => {
     const n = stems.find(n => tidOf(n) === t);
     return n ? ((roleInfo[n] || {}).role || "") : "";
   }).filter(Boolean))];
   if (roles.length > 1) {
-    return `立體聲配對「${name}」的左右角色不一致（${roles.join("、")}）：配對的兩軌必須是同一種角色。`;
+    return groupL(`立體聲配對「${name}」的左右角色不一致（${roles.join("、")}）：配對的兩軌必須是同一種角色。`,
+      `Stereo pair “${name}” has different roles on left and right (${roles.join(", ")}): both tracks of a pair must have the same role.`);
   }
   return "";
 }
@@ -793,7 +999,7 @@ async function saveGroups() {
         player.load();
         invalidateComparison();
         $("result").classList.add("hide");
-        $("status").textContent = "群組設定已變更，重新混音後生效";
+        $("status").textContent = L("群組設定已變更，重新混音後生效", "Group settings changed. Mix again to apply.");
       }
       // What the server holds now is what was sent.  A pair that was not
       // finished kept the declaration it already had, so it is unchanged here.
@@ -864,7 +1070,7 @@ function renderGroups() {
     head.appendChild(title);
     const rm = document.createElement("button");
     rm.className = "grm";
-    rm.textContent = "移除群組";
+    rm.textContent = L("移除群組", "Remove group");
     rm.onclick = async () => {
       members.forEach(t => delete groupByTrack[t]);
       delete groupPans[name];
@@ -882,7 +1088,8 @@ function renderGroups() {
 
     const mem = document.createElement("div");
     mem.className = "gmem";
-    mem.textContent = "成員：" + members.map(fileNameOf).join("、");
+    mem.textContent = L("成員：" + members.map(fileNameOf).join("、"),
+      "Members: " + members.map(fileNameOf).join(", "));
     g.appendChild(mem);
 
     // The mode of the group.  The default is the same-source group it has
@@ -891,12 +1098,13 @@ function renderGroups() {
     const modeRow = document.createElement("div");
     modeRow.className = "grow";
     const modeLab = document.createElement("label");
-    modeLab.textContent = "群組模式：" + name;
+    modeLab.textContent = L("群組模式：", "Group mode: ") + name;
     const modeSel = document.createElement("select");
     modeSel.id = groupDomId("mode");
     modeLab.htmlFor = modeSel.id;
-    modeSel.setAttribute("aria-label", "群組模式：" + name);
-    [["mono", "同來源多麥克風"], ["stereo_pair", "立體聲配對（兩軌）"]].forEach(choice => {
+    modeSel.setAttribute("aria-label", L("群組模式：", "Group mode: ") + name);
+    [["mono", L("同來源多麥克風", "One source, several mics")],
+     ["stereo_pair", L("立體聲配對（兩軌）", "Stereo pair (two tracks)")]].forEach(choice => {
       const o = document.createElement("option");
       o.value = choice[0];
       o.textContent = choice[1];
@@ -921,14 +1129,14 @@ function renderGroups() {
         const row = document.createElement("div");
         row.className = "grow";
         const lab = document.createElement("label");
-        lab.textContent = label + "：" + name;
+        lab.textContent = label + L("：", ": ") + name;
         const sel = document.createElement("select");
         sel.id = groupDomId(which);
         lab.htmlFor = sel.id;
-        sel.setAttribute("aria-label", label + "：" + name);
+        sel.setAttribute("aria-label", label + L("：", ": ") + name);
         const none = document.createElement("option");
         none.value = "";
-        none.textContent = "— 尚未指定 —";
+        none.textContent = L("— 尚未指定 —", "— not assigned —");
         none.selected = !current;
         sel.appendChild(none);
         members.forEach(t => {
@@ -949,21 +1157,21 @@ function renderGroups() {
         row.appendChild(sel);
         return row;
       };
-      g.appendChild(sideRow("left", "左聲道", left));
-      g.appendChild(sideRow("right", "右聲道", right));
+      g.appendChild(sideRow("left", L("左聲道", "Left channel"), left));
+      g.appendChild(sideRow("right", L("右聲道", "Right channel"), right));
 
       // the shared position: a stereo image position, not a balance
       const posRow = document.createElement("div");
       posRow.className = "grow";
       const posLab = document.createElement("label");
-      posLab.textContent = "配對位置：" + name;
+      posLab.textContent = L("配對位置：", "Pair position: ") + name;
       const range = document.createElement("input");
       range.type = "range";
       range.min = "-1"; range.max = "1"; range.step = "any";
       range.value = String(panValue);
       range.id = groupDomId("pos");
       posLab.htmlFor = range.id;
-      range.setAttribute("aria-label", "配對位置：" + name);
+      range.setAttribute("aria-label", L("配對位置：", "Pair position: ") + name);
       const val = document.createElement("span");
       val.className = "gval";
       val.textContent = fmt(range.value, 2);
@@ -982,15 +1190,16 @@ function renderGroups() {
 
       const posHint = document.createElement("div");
       posHint.className = "gmem";
-      posHint.textContent =
-        "配對位置是立體聲定位，不是左右平衡：往一側偏移時影像會收窄，兩軌在極值會疊到同一側。";
+      posHint.textContent = L(
+        "配對位置是立體聲定位，不是左右平衡：往一側偏移時影像會收窄，兩軌在極值會疊到同一側。",
+        "Pair position places the stereo image; it is not a balance control. Moving it to one side narrows the image, and at the extremes both tracks land on the same side.");
       g.appendChild(posHint);
 
       // the shared gain
       const gainRow = document.createElement("div");
       gainRow.className = "grow";
       const gainLab = document.createElement("label");
-      gainLab.textContent = "配對增益：" + name;
+      gainLab.textContent = L("配對增益：", "Pair gain: ") + name;
       const gain = document.createElement("input");
       gain.type = "number";
       gain.min = "-12"; gain.max = "12"; gain.step = "any";
@@ -998,10 +1207,10 @@ function renderGroups() {
       gain.value = gainState ? gainState.text : "0";
       gain.id = groupDomId("gain");
       gainLab.htmlFor = gain.id;
-      gain.setAttribute("aria-label", "配對增益：" + name);
+      gain.setAttribute("aria-label", L("配對增益：", "Pair gain: ") + name);
       const unit = document.createElement("span");
       unit.className = "gval";
-      unit.textContent = "dB（左右兩軌一起）";
+      unit.textContent = L("dB（左右兩軌一起）", "dB (both tracks together)");
       gain.oninput = () => {
         // What the user typed is kept as it is: an empty or out-of-range
         // entry is a draft that has to be reported, not a zero and not the
@@ -1028,9 +1237,12 @@ function renderGroups() {
         status.textContent = problem;
       } else {
         status.className = "gok";
-        status.textContent = "立體聲配對：左聲道 " + fileNameOf(left) + "、右聲道 " + fileNameOf(right) +
+        status.textContent = L("立體聲配對：左聲道 " + fileNameOf(left) + "、右聲道 " + fileNameOf(right) +
           " 各自保留自己的聲道與位置；共用總線／母帶之前維持匯入時的左右關係" +
-          "（偏移配對位置或個別覆寫會改變這個關係）。";
+          "（偏移配對位置或個別覆寫會改變這個關係）。",
+          "Stereo pair: left " + fileNameOf(left) + ", right " + fileNameOf(right) +
+          " each keep their own channel and position; the imported left/right relationship is kept up to the shared bus / master" +
+          " (moving the pair position or overriding a single track changes it).");
       }
       g.appendChild(status);
 
@@ -1039,8 +1251,9 @@ function renderGroups() {
       if (!sameDeclaration(declarationFor(name, members), saved)) {
         const draft = document.createElement("div");
         draft.className = "warn";
-        draft.textContent =
-          "尚未儲存：這個立體聲配對還沒有送出，伺服器仍保留先前的宣告；選好左右聲道之後才會生效。";
+        draft.textContent = L(
+          "尚未儲存：這個立體聲配對還沒有送出，伺服器仍保留先前的宣告；選好左右聲道之後才會生效。",
+          "Not saved: this stereo pair has not been sent yet and the server keeps the previous declaration. It takes effect once left and right are chosen.");
         g.appendChild(draft);
       }
     } else {
@@ -1048,7 +1261,7 @@ function renderGroups() {
       const row = document.createElement("div");
       row.className = "grow";
       const lab = document.createElement("label");
-      lab.textContent = "群組共用位置";
+      lab.textContent = L("群組共用位置", "Group pan");
       const range = document.createElement("input");
       range.type = "range";
       range.min = "-1"; range.max = "1"; range.step = "any";
@@ -1071,16 +1284,20 @@ function renderGroups() {
       const status = document.createElement("div");
       if (members.length < 2) {
         status.className = "gbad";
-        status.textContent = "還需要至少兩軌才會保留關係；把另一支麥克風的檔案填上同一個名稱即可。";
+        status.textContent = L("還需要至少兩軌才會保留關係；把另一支麥克風的檔案填上同一個名稱即可。",
+          "Needs at least two tracks to keep the relationship; give the other mic's file the same name.");
       } else if (gone.length) {
         status.className = "gbad";
-        status.textContent = "有成員的檔案已不在這次混音裡（" + gone.map(fileNameOf).join("、") + "）：這個群組無法保留關係。";
+        status.textContent = L("有成員的檔案已不在這次混音裡（" + gone.map(fileNameOf).join("、") + "）：這個群組無法保留關係。",
+          "Some member files are no longer in this mix (" + gone.map(fileNameOf).join(", ") + "): this group cannot keep the relationship.");
       } else if (excluded.length) {
         status.className = "gbad";
-        status.textContent = "有成員被排除（" + excluded.map(fileNameOf).join("、") + "）：這個群組無法保留關係。";
+        status.textContent = L("有成員被排除（" + excluded.map(fileNameOf).join("、") + "）：這個群組無法保留關係。",
+          "Some members are excluded (" + excluded.map(fileNameOf).join(", ") + "): this group cannot keep the relationship.");
       } else {
         status.className = "gok";
-        status.textContent = "會在共用總線／母帶之前，保留這 " + members.length + " 軌匯入時的時間、相位與波形關係。";
+        status.textContent = L("會在共用總線／母帶之前，保留這 " + members.length + " 軌匯入時的時間、相位與波形關係。",
+          "Keeps the imported timing, phase and waveform relationship of these " + members.length + " tracks up to the shared bus / master.");
       }
       g.appendChild(status);
     }
@@ -1105,7 +1322,7 @@ function renderFiles() {
     const play = document.createElement("button");
     play.className = "rm";
     play.textContent = "▶";
-    play.title = "試聽這軌原始檔案";
+    play.title = L("試聽這軌原始檔案", "Play this track's original file");
     play.onclick = (ev) => {
       ev.stopPropagation();
       // a solo is its own view: it is not part of the level-matched
@@ -1129,13 +1346,13 @@ function renderFiles() {
         b.textContent = txt;
         badges.appendChild(b);
       };
-      if (m.silent) addBadge("靜音", "bad");
-      if (m.clipped_ratio > 0.005) addBadge(`削波 ${(m.clipped_ratio * 100).toFixed(0)}%`, "bad");
-      if (!m.silent && m.lufs < -30) addBadge("很小聲", "warn");
-      if (!m.silent && m.lufs > -6) addBadge("過熱", "warn");
+      if (m.silent) addBadge(L("靜音", "silent"), "bad");
+      if (m.clipped_ratio > 0.005) addBadge(`${L("削波", "clipping")} ${(m.clipped_ratio * 100).toFixed(0)}%`, "bad");
+      if (!m.silent && m.lufs < -30) addBadge(L("很小聲", "very quiet"), "warn");
+      if (!m.silent && m.lufs > -6) addBadge(L("過熱", "hot"), "warn");
       // sibilance is a vocal problem; hats and snares are *supposed* to be bright
       if (!m.silent && m.sibilance >= 0.05 && /vocal/.test(info.role || "")) {
-        addBadge("齒音", "warn");
+        addBadge(L("齒音", "sibilance"), "warn");
       }
       if (m.active_s > 0) addBadge(`${m.active_s.toFixed(0)}s`, "");
       d.appendChild(badges);
@@ -1148,8 +1365,9 @@ function renderFiles() {
 
     const sel = document.createElement("select");
     sel.title = info.source === "user"
-      ? (info.detected ? `手動指定（自動判斷是 ${info.detected}）` : "手動指定（自動判斷尚未完成）")
-      : "自動判斷；判斷錯可以直接改";
+      ? (info.detected ? L(`手動指定（自動判斷是 ${info.detected}）`, `Set manually (auto-detected: ${info.detected})`)
+        : L("手動指定（自動判斷尚未完成）", "Set manually (auto-detection not finished)"))
+      : L("自動判斷；判斷錯可以直接改", "Auto-detected; change it if it is wrong");
     allRoles.forEach(r => {
       const o = document.createElement("option");
       o.value = r;
@@ -1163,15 +1381,15 @@ function renderFiles() {
 
     const tag = document.createElement("span");
     tag.className = "tag";
-    tag.textContent = info.source === "user" ? "手動" : "自動";
+    tag.textContent = info.source === "user" ? L("手動", "manual") : L("自動", "auto");
     d.appendChild(tag);
 
     const gname = document.createElement("input");
     gname.type = "text";
     gname.className = "gname";
     gname.maxLength = 64;
-    gname.placeholder = "群組名稱";
-    gname.title = "不同支麥克風錄到同一個來源：填一樣的名稱";
+    gname.placeholder = L("群組名稱", "Group name");
+    gname.title = L("不同支麥克風錄到同一個來源：填一樣的名稱", "Several mics on the same source: give them the same name");
     gname.value = groupByTrack[tidOf(n)] || "";
     if (gname.value) gname.classList.add("set");
     gname.onchange = () => { setGroupName(tidOf(n), gname.value); };
@@ -1181,8 +1399,8 @@ function renderFiles() {
     mute.className = "rm";
     const tid = tidOf(n);
     const isMuted = mutedTracks.has(tid);
-    mute.textContent = isMuted ? "納入" : "排除";
-    mute.title = isMuted ? "加回混音" : "從混音中排除（檔案保留）";
+    mute.textContent = isMuted ? L("納入", "Include") : L("排除", "Exclude");
+    mute.title = isMuted ? L("加回混音", "Add back to the mix") : L("從混音中排除（檔案保留）", "Leave out of the mix (the file is kept)");
     mute.onclick = async (ev) => {
       ev.stopPropagation();
       try {
@@ -1195,7 +1413,8 @@ function renderFiles() {
         renderFiles();
         $("result").classList.add("stale");
         invalidateComparison();
-        $("status").textContent = isMuted ? "已納入，重新混音後生效" : "已排除，重新混音後生效";
+        $("status").textContent = isMuted ? L("已納入，重新混音後生效", "Included. Mix again to apply.")
+          : L("已排除，重新混音後生效", "Excluded. Mix again to apply.");
       } catch (e) {
         $("status").innerHTML = `<span class="err">${e.message}</span>`;
       }
@@ -1204,8 +1423,8 @@ function renderFiles() {
 
     const x = document.createElement("button");
     x.className = "rm";
-    x.textContent = "移除";
-    x.title = "從這次混音中移除這一軌";
+    x.textContent = L("移除", "Remove");
+    x.title = L("從這次混音中移除這一軌", "Remove this track from this mix");
     x.onclick = (ev) => { ev.stopPropagation(); removeStem(n); };
     d.appendChild(x);
 
@@ -1291,7 +1510,7 @@ async function setRole(name, role) {
       roleInfo = mergeRoleInfo(confirmedRoles);
       renderFiles();
       $("result").classList.add("hide");
-      $("status").textContent = "角色已更新，重新混音即可";
+      $("status").textContent = L("角色已更新，重新混音即可", "Role updated. Mix again to apply.");
     }
   } catch (e) {
     // The save failed, so this is not a saved choice: go back to what the
@@ -1317,7 +1536,8 @@ async function removeStem(name) {
     renderFiles();
     // a stale result panel next to a changed stem list is a lie
     $("result").classList.add("hide");
-    $("status").textContent = stems.length ? `${stems.length} 軌就緒` : "";
+    $("status").textContent = stems.length ? L(`${stems.length} 軌就緒`,
+      `${stems.length} stem${stems.length === 1 ? "" : "s"} ready`) : "";
   } catch (e) {
     $("status").innerHTML = `<span class="err">${e.message}</span>`;
   }
@@ -1338,11 +1558,11 @@ async function uploadRef(file) {
       body: file
     });
     hasRef = true;
-    $("refdrop").textContent = `參考曲：${file.name}`;
+    $("refdrop").textContent = L(`參考曲：${file.name}`, `Reference: ${file.name}`);
     $("refdrop").classList.add("set");
     refreshRefButton();
   } catch (e) {
-    $("refdrop").textContent = `參考曲失敗：${e.message}`;
+    $("refdrop").textContent = L(`參考曲失敗：${e.message}`, `Reference failed: ${e.message}`);
   } finally { importsInProgress--; }
   refreshGo();
 }
@@ -1369,7 +1589,7 @@ function wireDrop(el, onFiles, hotClass) {
 function fmt(v, digits = 2) { return (v >= 0 ? "" : "") + Number(v).toFixed(digits); }
 
 async function run() {
-  if (!stems.length || !style) return;
+  if (!stems.length || !style || languageSwitching) return;
   // A group that cannot be protected stops the mix here, with a reason the
   // user can act on: the mix would otherwise run without the protection the
   // group claims.
@@ -1384,7 +1604,7 @@ async function run() {
   }
   const btn = $("go");
   btn.disabled = true;
-  btn.innerHTML = `<span class="spin"></span>混音中…`;
+  btn.innerHTML = `<span class="spin"></span>${L("混音中…", "Mixing…")}`;
   $("status").textContent = "";
   const t0 = performance.now();
   // Keep visible progress while a render is running.
@@ -1402,13 +1622,14 @@ async function run() {
   let cancelError = null;  // the newest attempt failed in transport
   let cancelAttempt = 0;   // which cancel attempt of this run is the newest
   const stageName = {
-    loading: "讀取分軌", roles: "判斷角色", measuring: "量測", planning: "建立計畫",
-    rendering: "渲染", writing: "寫檔", starting: "啟動"
+    loading: L("讀取分軌", "Reading stems"), roles: L("判斷角色", "Detecting roles"),
+    measuring: L("量測", "Measuring"), planning: L("建立計畫", "Planning"),
+    rendering: L("渲染", "Rendering"), writing: L("寫檔", "Writing files"), starting: L("啟動", "Starting")
   };
   let latest = null;
   const paintProgress = () => {
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
-    const st = latest && latest.stage ? (stageName[latest.stage] || latest.stage) : "處理中";
+    const st = latest && latest.stage ? (stageName[latest.stage] || latest.stage) : L("處理中", "Working");
     const count = latest && latest.total ? ` ${latest.done}/${latest.total}` : "";
     const line = `${st}${count}… ${secs}s`;
     if (cancelError) {
@@ -1431,7 +1652,7 @@ async function run() {
     // attempt's error does not stay on screen.
     cancelState = "pending";
     cancelError = null;
-    $("status").textContent = "正在取消…";
+    $("status").textContent = L("正在取消…", "Cancelling…");
     try {
       const r = await api(`/api/session/${sessionId}/cancel`, { method: "POST", body: "" });
       // The run ended while this request was in flight, or a newer attempt
@@ -1473,7 +1694,7 @@ async function run() {
   }, 400);
   try {
     // the grouping must be in the session before the mix reads it
-    if (!await saveGroups()) throw new Error("群組設定沒有存成，這次混音沒有開始");
+    if (!await saveGroups()) throw new Error(L("群組設定沒有存成，這次混音沒有開始", "Group settings were not saved, so this mix did not start"));
     const body = runBody();
     const r = await api(`/api/session/${sessionId}/run`, {
       method: "POST",
@@ -1484,14 +1705,14 @@ async function run() {
     // the mix is saved now, so the hint says what happened to it: the older
     // "cannot be restored" wording is no longer true, and naming a superseded
     // result would only be misleading
-    $("control-hint").textContent = "已儲存這次成功混音的設定。";
+    $("control-hint").textContent = L("已儲存這次成功混音的設定。", "Saved the settings of this successful mix.");
     // the exact restored values stay: they are the values the session was
     // saved with, and they only step aside when the user touches that control
     try { history.replaceState(null, "", "#s=" + sessionId); } catch (_) {}
   } catch (e) {
     const cancelled = /cancelled/i.test(e.message);
     $("status").innerHTML = cancelled
-      ? "已取消"
+      ? L("已取消", "Cancelled")
       : `<span class="err">${e.message}</span>`;
   } finally {
     // This run is over: from here on a late cancel reply has nothing to say.
@@ -1501,27 +1722,43 @@ async function run() {
     document.body.classList.remove("busy");
     cancelBtn.classList.add("hide");
     cancelBtn.onclick = null;
-    btn.textContent = "開始混音";
+    btn.textContent = L("開始混音", "Start mix");
     refreshGo();
   }
 }
 
 function roughBalanceStatus(decision) {
-  if (decision.origin === "explicit") return "手動保留量優先，已略過擬合";
-  if (decision.origin === "proof") return "來源原比例可保留：共同增益證據成立，未加逐軌校正；後續保護限制仍可能改變結果";
-  if (decision.origin === "reference_fit") return "來源音量擬合通過；只驗證處理前比例，後續保護限制與處理仍可能改變結果";
+  if (decision.origin === "explicit") return L("手動保留量優先，已略過擬合", "The manual keep amount wins; fitting was skipped");
+  if (decision.origin === "proof") return L("來源原比例可保留：共同增益證據成立，未加逐軌校正；後續保護限制仍可能改變結果",
+    "Source proportions can be kept: the common-gain evidence holds, no per-track correction was added; later protective limits may still change the result");
+  if (decision.origin === "reference_fit") return L("來源音量擬合通過；只驗證處理前比例，後續保護限制與處理仍可能改變結果",
+    "Source level fit passed; only the pre-processing proportions are verified, and later protective limits and processing may still change the result");
   const reasons = {
-    no_reference_audio: "尚未提供同曲粗混", duration_mismatch: "長度／時間軸不符",
-    shorter_than_minimum_coverage: "素材短於8秒", rank_or_condition: "聲部過於相似，無法辨識各軌",
-    nonpositive_coefficient: "部分聲部可能被移除或反相，無法只靠音量確認", digital_silence: "來源為靜音",
-    split_coefficients_unstable: "不同時段的比例不穩定", pooled_coefficients_unstable: "整體與分段推算不一致", relative_gain_span_out_of_bounds: "所需校正超過安全範圍",
-    insufficient_reference_coverage: "參考活動時間不足", local_or_global_validation_mismatch: "部分時段無法重建",
-    insufficient_column_coverage: "聲部有效活動時間不足", weak_or_unresolved_column: "弱聲部沒有足夠辨識證據",
-    not_coherent_linear_same_content: "不符合對齊的同曲音量模型", more_than_32_nonzero_stems: "超過32個非零聲部"
+    no_reference_audio: L("尚未提供同曲粗混", "No rough mix of this song was provided"),
+    duration_mismatch: L("長度／時間軸不符", "Length / timeline mismatch"),
+    shorter_than_minimum_coverage: L("素材短於8秒", "Audio shorter than 8 seconds"),
+    rank_or_condition: L("聲部過於相似，無法辨識各軌", "Parts are too similar to tell the tracks apart"),
+    nonpositive_coefficient: L("部分聲部可能被移除或反相，無法只靠音量確認", "Some parts may be missing or polarity-flipped; level alone cannot confirm it"),
+    digital_silence: L("來源為靜音", "The source is silent"),
+    split_coefficients_unstable: L("不同時段的比例不穩定", "Proportions are unstable across time segments"),
+    pooled_coefficients_unstable: L("整體與分段推算不一致", "Whole-song and per-segment estimates disagree"),
+    relative_gain_span_out_of_bounds: L("所需校正超過安全範圍", "The required correction is outside the safe range"),
+    insufficient_reference_coverage: L("參考活動時間不足", "Not enough active time in the reference"),
+    local_or_global_validation_mismatch: L("部分時段無法重建", "Some segments cannot be rebuilt"),
+    insufficient_column_coverage: L("聲部有效活動時間不足", "Not enough active time in some parts"),
+    weak_or_unresolved_column: L("弱聲部沒有足夠辨識證據", "Not enough evidence to identify a quiet part"),
+    not_coherent_linear_same_content: L("不符合對齊的同曲音量模型", "Does not fit an aligned same-song level model"),
+    more_than_32_nonzero_stems: L("超過32個非零聲部", "More than 32 non-silent parts")
   };
-  return "未通過：" + (reasons[decision.proof?.reason] || "無法確認同曲音量關係") + "；回退一般預設0.50，未套用部分校正";
+  return L("未通過：", "Did not pass: ") +
+    (reasons[decision.proof?.reason] || L("無法確認同曲音量關係", "Could not confirm the same-song level relationship")) +
+    L("；回退一般預設0.50，未套用部分校正", "; fell back to the general default 0.50, no partial correction applied");
 }
-const profileNames = { auto: "自動判斷", balanced_stems: "已平衡分組", raw_tracks: "原始音軌", reference_balance: "同曲粗混平衡", unknown: "未確認，沿用預設" };
+const profileNames = {
+  auto: L("自動判斷", "Auto-detect"), balanced_stems: L("已平衡分組", "Balanced stems"),
+  raw_tracks: L("原始音軌", "Raw tracks"), reference_balance: L("同曲粗混平衡", "Rough mix of this song"),
+  unknown: L("未確認，沿用預設", "Unconfirmed; using the default")
+};
 // The ordinary keep amount of a source profile: what the engine uses when the
 // user did not ask for a specific one.
 function profileDefault(profile) {
@@ -1530,10 +1767,10 @@ function profileDefault(profile) {
 function balanceWhy(decision) {
   if (!decision) return "";
   if (decision.requested === "reference_balance") return roughBalanceStatus(decision);
-  if (decision.origin === "proof") return "同曲對齊重建證據成立";
-  if (decision.origin === "explicit") return "採用手動拉桿";
-  if (decision.requested === "balanced_stems") return "採用已平衡分組宣告";
-  return "未取得同曲重建證據，保留一般預設";
+  if (decision.origin === "proof") return L("同曲對齊重建證據成立", "Aligned same-song rebuild evidence holds");
+  if (decision.origin === "explicit") return L("採用手動拉桿", "Using the manual slider");
+  if (decision.requested === "balanced_stems") return L("採用已平衡分組宣告", "Using your balanced-stems declaration");
+  return L("未取得同曲重建證據，保留一般預設", "No same-song rebuild evidence; keeping the general default");
 }
 function show(r, secs) {
   // what the published render says about the comparison pair.  A session
@@ -1559,9 +1796,10 @@ function show(r, secs) {
     const shown = balanceExplicit ? decision.requested_balance_preserve : profileDefault(decision.requested);
     $("balance").value = String(shown);
     $("balv").textContent = Number(shown).toFixed(2);
-    $("balmode").textContent = balanceExplicit ? "手動覆寫" : "來源預設";
+    $("balmode").textContent = balanceExplicit ? L("手動覆寫", "Manual override") : L("來源預設", "Source default");
     const why = balanceWhy(decision);
-    $("balance-intent").textContent = `${profileNames[decision.resolved]} · 實際保留 ${Number(decision.balance_preserve).toFixed(2)} · ${why}；軌道處理後、bus/master 前的平衡，不是音質分數。`;
+    $("balance-intent").textContent = L(`${profileNames[decision.resolved]} · 實際保留 ${Number(decision.balance_preserve).toFixed(2)} · ${why}；軌道處理後、bus/master 前的平衡，不是音質分數。`,
+      `${profileNames[decision.resolved]} · kept ${Number(decision.balance_preserve).toFixed(2)} · ${why}; the balance after track processing, before bus/master — not a quality score.`);
   } else if ((r.style || {}).balance_preserve != null) {
     // An older session only has the amount the engine ended up with.  That is
     // a result, not a choice, so it must not become a manual intent.
@@ -1569,28 +1807,29 @@ function show(r, secs) {
     const shown = profileDefault($("sourceprofile").value);
     $("balance").value = String(shown);
     $("balv").textContent = Number(shown).toFixed(2);
-    $("balmode").textContent = "來源預設";
+    $("balmode").textContent = L("來源預設", "Source default");
   }
   $("result").classList.remove("hide");
   const cells = [
-    ["響度", fmt(r.lufs, 2), "LUFS", `目標 ${fmt(r.target_lufs, 2)}`],
-    ["真峰值", fmt(r.true_peak_db, 2), "dBTP", `上限 ${fmt(r.ceiling_db, 2)}`],
-    ["動態", fmt(r.crest_db, 1), "dB", "crest"],
-    ["寬度", fmt(r.width, 3), "", "side/mid"],
-    ["相關性", fmt(r.correlation, 2), "", "1 = 單聲道"],
-    ["耗時", secs, /^[\d.]+$/.test(secs) ? "s" : "", r.reference_passes > 1 ? "參考曲兩階段" : ""],
-    ["平衡", fmt((r.style || {}).balance_preserve ?? 0, 2), "", decision ? `${profileNames[decision.resolved]} · ${balanceExplicit ? "手動覆寫" : decision.origin === "proof" ? "同曲重建證據" : decision.origin === "reference_fit" ? "同曲音量擬合" : "來源預設"}；bus/master 仍會改變成品` : "軌道處理後保留平衡；bus/master 仍會改變成品"]
+    [L("響度", "Loudness"), fmt(r.lufs, 2), "LUFS", `${L("目標", "target")} ${fmt(r.target_lufs, 2)}`],
+    [L("真峰值", "True peak"), fmt(r.true_peak_db, 2), "dBTP", `${L("上限", "ceiling")} ${fmt(r.ceiling_db, 2)}`],
+    [L("動態", "Dynamics"), fmt(r.crest_db, 1), "dB", "crest"],
+    [L("寬度", "Width"), fmt(r.width, 3), "", "side/mid"],
+    [L("相關性", "Correlation"), fmt(r.correlation, 2), "", L("1 = 單聲道", "1 = mono")],
+    [L("耗時", "Time"), secs, /^[\d.]+$/.test(secs) ? "s" : "", r.reference_passes > 1 ? L("參考曲兩階段", "two reference passes") : ""],
+    [L("平衡", "Balance"), fmt((r.style || {}).balance_preserve ?? 0, 2), "", decision ? `${profileNames[decision.resolved]} · ${balanceExplicit ? L("手動覆寫", "manual override") : decision.origin === "proof" ? L("同曲重建證據", "same-song rebuild evidence") : decision.origin === "reference_fit" ? L("同曲音量擬合", "same-song level fit") : L("來源預設", "source default")}${L("；bus/master 仍會改變成品", "; bus/master still changes the result")}` : L("軌道處理後保留平衡；bus/master 仍會改變成品", "Balance kept after track processing; bus/master still changes the result")]
   ];
   if (decision && decision.requested === "reference_balance") {
-    const verdict = decision.origin === "reference_fit" ? "擬合通過" : decision.origin === "proof" ? "原比例可保留" : decision.origin === "explicit" ? "手動略過" : "未通過";
-    cells.push(["同曲粗混（來源證據）", verdict, "", roughBalanceStatus(decision), "reference-tone"]);
+    const verdict = decision.origin === "reference_fit" ? L("擬合通過", "Fit passed") : decision.origin === "proof" ? L("原比例可保留", "Proportions kept") : decision.origin === "explicit" ? L("手動略過", "Skipped (manual)") : L("未通過", "Did not pass");
+    cells.push([L("同曲粗混（來源證據）", "Rough mix of this song (source evidence)"), verdict, "", roughBalanceStatus(decision), "reference-tone"]);
   }
   if (r.reference_tone) {
     const t = r.reference_tone;
-    const note = t.after_db == null ? "可比頻帶不足" : t.after_db <= 0.5 ? "已接近參考音色" :
-      t.after_db < t.before_db ? "差距縮小，仍有落差" : "本次未縮小";
-    cells.push(["參考音色距離", t.after_db == null ? "資訊不足" : `${fmt(t.before_db, 2)} → ${fmt(t.after_db, 2)}`,
-      t.after_db == null ? "" : "dB", `套用參考前→後 · ${t.band_count} 個共同頻帶 · ${note}；不是音質分數`, "reference-tone"]);
+    const note = t.after_db == null ? L("可比頻帶不足", "not enough comparable bands") : t.after_db <= 0.5 ? L("已接近參考音色", "close to the reference tone") :
+      t.after_db < t.before_db ? L("差距縮小，仍有落差", "gap narrowed, some difference remains") : L("本次未縮小", "not narrowed this time");
+    cells.push([L("參考音色距離", "Distance to reference tone"), t.after_db == null ? L("資訊不足", "Not enough data") : `${fmt(t.before_db, 2)} → ${fmt(t.after_db, 2)}`,
+      t.after_db == null ? "" : "dB", L(`套用參考前→後 · ${t.band_count} 個共同頻帶 · ${note}；不是音質分數`,
+        `before → after applying the reference · ${t.band_count} shared bands · ${note}; not a quality score`), "reference-tone"]);
   }
   $("metrics").innerHTML = cells.map(([k, v, u, s, extra = ""]) =>
     `<div class="m ${extra}"><div class="k">${k}</div><div class="v">${v} <small>${u}</small></div>
@@ -1602,8 +1841,9 @@ function show(r, secs) {
     const summary = r.export_summary || {};
     const gap = (summary.comparison || {}).reference_minus_sum_rms_dbfs;
     exp.innerHTML =
-      `<span class="lab">已匯出 ${r.exported.length} 個檔案 · ${(total / 1048576).toFixed(1)} MB</span>` +
-      (summary.common_gain_db != null ? `<p>共同匯出增益 ${fmt(summary.common_gain_db, 2)} dB · 成品比含殘響的分軌總和 ${gap == null ? "無法量測" : fmt(gap, 2) + " dB"}。分軌經 bus/master 前的差異詳見匯出報告。</p>` : "") +
+      `<span class="lab">${L(`已匯出 ${r.exported.length} 個檔案`, `Exported ${r.exported.length} file${r.exported.length === 1 ? "" : "s"}`)} · ${(total / 1048576).toFixed(1)} MB</span>` +
+      (summary.common_gain_db != null ? L(`<p>共同匯出增益 ${fmt(summary.common_gain_db, 2)} dB · 成品比含殘響的分軌總和 ${gap == null ? "無法量測" : fmt(gap, 2) + " dB"}。分軌經 bus/master 前的差異詳見匯出報告。</p>`,
+        `<p>Common export gain ${fmt(summary.common_gain_db, 2)} dB · mix minus the sum of stems (with reverb): ${gap == null ? "not measurable" : fmt(gap, 2) + " dB"}. See the export report for how the stems differ before bus/master.</p>`) : "") +
       r.exported.map(e =>
         `<a class="sec" href="/api/session/${sessionId}/processed/file/${encodeURIComponent(e.name)}" download>${e.name}</a>`
       ).join("");
@@ -1626,7 +1866,7 @@ function show(r, secs) {
   const secList = r.sections || [];
   const secBox = $("sections");
   if (secList.length > 1) {
-    secBox.innerHTML = `<span class="lab">段落</span>` + secList.map(s =>
+    secBox.innerHTML = `<span class="lab">${L("段落", "Sections")}</span>` + secList.map(s =>
       `<span class="sec ${s.label}">${s.label} ${s.start_s.toFixed(0)}–${s.end_s.toFixed(0)}s</span>`
     ).join("");
   } else {
@@ -1641,16 +1881,19 @@ if (receipt && (receipt.groups || []).length) {
   gs.innerHTML = "";
   const head = document.createElement("div");
   head.className = "lab";
-  head.textContent = "麥克風群組保護（共用總線／母帶之前）";
+  head.textContent = L("麥克風群組保護（共用總線／母帶之前）", "Mic group protection (up to the shared bus / master)");
   gs.appendChild(head);
   receipt.groups.forEach(g => {
     const line = document.createElement("div");
     if (g.mode === "stereo_pair") {
       const pair = g.members || [];
-      line.textContent = `${g.id}：立體聲配對 — 左聲道 ${pair[0] || ""}、右聲道 ${pair[1] || ""}` +
-        ` · 配對位置 ${fmt(g.pan, 2)} · 共用增益 ${fmt(g.trim_db, 2)} dB`;
+      line.textContent = L(`${g.id}：立體聲配對 — 左聲道 ${pair[0] || ""}、右聲道 ${pair[1] || ""}` +
+        ` · 配對位置 ${fmt(g.pan, 2)} · 共用增益 ${fmt(g.trim_db, 2)} dB`,
+        `${g.id}: stereo pair — left ${pair[0] || ""}, right ${pair[1] || ""}` +
+        ` · pair position ${fmt(g.pan, 2)} · shared gain ${fmt(g.trim_db, 2)} dB`);
     } else {
-      line.textContent = `${g.id}：${(g.protected_tracks || []).join("、")} · 共用位置 ${fmt(g.pan, 2)}`;
+      line.textContent = L(`${g.id}：${(g.protected_tracks || []).join("、")} · 共用位置 ${fmt(g.pan, 2)}`,
+        `${g.id}: ${(g.protected_tracks || []).join(", ")} · group pan ${fmt(g.pan, 2)}`);
     }
     gs.appendChild(line);
     (g.notes || []).forEach(n => {
@@ -1662,17 +1905,22 @@ if (receipt && (receipt.groups || []).length) {
   });
   const scope = document.createElement("div");
   scope.style.marginTop = "6px";
-  scope.textContent =
+  scope.textContent = L(
     "保護範圍只到共用總線／母帶之前：保留的是匯入時的時間、相位與波形關係。" +
-    "不會自動對齊、不會翻轉極性、不會消除串音；共用總線／母帶仍會改變成品。";
+    "不會自動對齊、不會翻轉極性、不會消除串音；共用總線／母帶仍會改變成品。",
+    "Protection reaches only up to the shared bus / master: it keeps the imported timing, phase and waveform relationship. " +
+    "It does not auto-align, flip polarity or remove bleed; the shared bus / master still changes the result.");
   gs.appendChild(scope);
   if ((receipt.groups || []).some(g => g.mode === "stereo_pair")) {
     const pairScope = document.createElement("div");
     pairScope.style.marginTop = "6px";
-    pairScope.textContent =
+    pairScope.textContent = L(
       "立體聲配對：左右兩軌不會被合成一個共用位置，各自保留自己的聲道與位置。" +
       "配對位置在 0 時維持匯入的左右關係；往一側偏移時影像會收窄，兩軌在極值會疊到同一側 —— " +
-      "這是立體聲定位，不是左右平衡，也不是品質保證。共用增益是兩軌一起移動。";
+      "這是立體聲定位，不是左右平衡，也不是品質保證。共用增益是兩軌一起移動。",
+      "Stereo pair: the two tracks are not folded into one shared position; each keeps its own channel and position. " +
+      "At pair position 0 the imported left/right relationship is kept; moving it to one side narrows the image, and at the extremes both tracks land on the same side — " +
+      "this is stereo placement, not a balance control, and not a quality guarantee. Shared gain moves both tracks together.");
     gs.appendChild(pairScope);
   }
   gs.classList.remove("hide");
@@ -1697,11 +1945,13 @@ const w = $("warns");
     pansInfo[t.id] = Number(t.pan || 0);
   });
   const unmaskTitle = effect => {
-    if (!effect) return "本次未套用人聲讓位";
+    if (!effect) return L("本次未套用人聲讓位", "No vocal carve applied this time");
     const probes = effect.probes || [];
-    if (!probes.length) return "顯示曲線宣告的中心最大衰減；尚無可量測的穩定片段，不作實測主張（壓縮前）";
+    if (!probes.length) return L("顯示曲線宣告的中心最大衰減；尚無可量測的穩定片段，不作實測主張（壓縮前）",
+      "Shows the curve's declared maximum cut at its center; no stable passage could be measured, so no measured claim is made (pre-compression)");
     const measured = probes.map(p => Number(p.measured_db));
-    return `穩定片段窄頻實測變化 ${fmt(Math.min(...measured), 2)}～${fmt(Math.max(...measured), 2)} dB；${probes.length} 個片段，於動態 EQ 這一步、壓縮前量測`;
+    return L(`穩定片段窄頻實測變化 ${fmt(Math.min(...measured), 2)}～${fmt(Math.max(...measured), 2)} dB；${probes.length} 個片段，於動態 EQ 這一步、壓縮前量測`,
+      `Measured narrow-band change on stable passages: ${fmt(Math.min(...measured), 2)} to ${fmt(Math.max(...measured), 2)} dB; ${probes.length} passage${probes.length === 1 ? "" : "s"}, measured at the dynamic EQ stage, before compression`);
   };
   const rows = r.tracks.map(t => `<tr>
       <td>${t.id}</td>
@@ -1711,12 +1961,12 @@ const w = $("warns");
         <button data-pan="${t.id}" data-d="-0.1">◀</button>
         <span>${fmt(t.pan, 2)}</span>
         <button data-pan="${t.id}" data-d="0.1">▶</button>
-        <button data-pan="${t.id}" data-pan-value="0" aria-label="聲像歸零：${t.id}" title="將此軌聲像偏移設為 0（取消額外的左右偏移；寬度與效果維持不變）">0</button>
+        <button data-pan="${t.id}" data-pan-value="0" aria-label="${L("聲像歸零：", "Center pan: ")}${t.id}" title="${L("將此軌聲像偏移設為 0（取消額外的左右偏移；寬度與效果維持不變）", "Set this track's pan offset to 0 (removes the extra left/right offset; width and effects stay as they are)")}">0</button>
       </td>
       <td class="num">${fmt(t.hpf_hz, 0)}</td>
       <td class="num">${fmt(t.send, 3)}</td>
       <td class="num">${t.ride_db ? `${fmt(t.ride_db[0], 1)}…${fmt(t.ride_db[1], 1)}` : "—"}</td>
-      <td class="num" title="${unmaskTitle(t.dynamic_eq)}">${t.dynamic_eq ? `${fmt(t.dynamic_eq.duty_fraction * 100, 1)}% 時間<br>${fmt((t.dynamic_eq.center_hz || 3200) / 1000, 1)} kHz 中心最多 ${fmt(t.dynamic_eq.max_nominal_cut_db, 2)} dB` : "未讓位"}</td>
+      <td class="num" title="${unmaskTitle(t.dynamic_eq)}">${t.dynamic_eq ? L(`${fmt(t.dynamic_eq.duty_fraction * 100, 1)}% 時間<br>${fmt((t.dynamic_eq.center_hz || 3200) / 1000, 1)} kHz 中心最多 ${fmt(t.dynamic_eq.max_nominal_cut_db, 2)} dB`, `${fmt(t.dynamic_eq.duty_fraction * 100, 1)}% of the time<br>up to ${fmt(t.dynamic_eq.max_nominal_cut_db, 2)} dB around ${fmt((t.dynamic_eq.center_hz || 3200) / 1000, 1)} kHz`) : L("未讓位", "none")}</td>
       <td class="trim">
         <button data-trim="${t.id}" data-d="-0.5">−</button>
         <span>${t.trim_db ? (t.trim_db > 0 ? "+" : "") + fmt(t.trim_db, 1) : "0"}</span>
@@ -1724,7 +1974,7 @@ const w = $("warns");
       </td>
     </tr>`).join("");
   $("tracks").innerHTML =
-    `<tr><th>軌道</th><th>角色</th><th>增益 dB</th><th>pan</th><th>HPF Hz</th><th>reverb</th><th>動態 dB</th><th>人聲讓位</th><th>微調</th></tr>${rows}`;
+    `<tr><th>${L("軌道", "Track")}</th><th>${L("角色", "Role")}</th><th>${L("增益 dB", "Gain dB")}</th><th>pan</th><th>HPF Hz</th><th>reverb</th><th>${L("動態 dB", "Ride dB")}</th><th>${L("人聲讓位", "Vocal carve")}</th><th>${L("微調", "Trim")}</th></tr>${rows}`;
 
   $("dlmix").href = `/api/session/${sessionId}/download/mix`;
   $("dlplan").href = `/api/session/${sessionId}/plan`;
@@ -1738,7 +1988,8 @@ const w = $("warns");
     // a capacity warning, not just a number: the export writes one 24-bit
     // stereo WAV per track, so a long session adds up fast
     if (mb > 300) {
-      $("expsize").title = "素材很大，匯出會佔不少磁碟空間，也可能跑一陣子";
+      $("expsize").title = L("素材很大，匯出會佔不少磁碟空間，也可能跑一陣子",
+        "Large session: the export will take a fair amount of disk space and may take a while");
       $("expsize").style.color = "var(--warn)";
     } else {
       $("expsize").title = "";
@@ -1747,7 +1998,8 @@ const w = $("warns");
   }
   // a new render is a new song: the comparison starts at the beginning
   setAB("mix", {fresh: true});
-  $("status").textContent = `${r.tracks.length} 軌完成`;
+  $("status").textContent = L(`${r.tracks.length} 軌完成`,
+    `${r.tracks.length} track${r.tracks.length === 1 ? "" : "s"} done`);
 }
 
 async function drawWave(kind) {
@@ -1790,7 +2042,7 @@ function refreshPrevButton(r) {
   if (!btn) return;
   const has = !!(r && r.prev_style);
   btn.classList.toggle("hide", !has);
-  if (has) btn.textContent = `上一個：${r.prev_style}`;
+  if (has) btn.textContent = L(`上一個：${r.prev_style}`, `Previous: ${r.prev_style}`);
 }
 
 // ---------------------------------------------------------- the A/B switch
@@ -1883,8 +2135,8 @@ function refreshABState() {
   if (!btn) return;
   btn.disabled = !matched;
   btn.title = matched
-    ? "未處理的原始總和，與混音後在同一個音量比較"
-    : "這個工作階段還沒有等響度比較；重新混音後才會有";
+    ? L("未處理的原始總和，與混音後在同一個音量比較", "The unprocessed raw sum, compared with the mix at the same level")
+    : L("這個工作階段還沒有等響度比較；重新混音後才會有", "This session has no level-matched comparison yet; mix again to get one");
 }
 
 function invalidateComparison() {
@@ -1902,38 +2154,45 @@ function setABNote(mon, kind) {
     // these two are not part of the level-matched pair: the reference still
     // goes through its own gain and ceiling, so calling it "unprocessed"
     // would be as untrue as claiming the pair covers it
-    el.textContent = "這個視圖不在目前的等響度配對範圍內：它沒有和「混音後」一起配對音量。";
+    el.textContent = L("這個視圖不在目前的等響度配對範圍內：它沒有和「混音後」一起配對音量。",
+      "This view is not part of the current level-matched pair: its level is not matched to “Mix”.");
     return;
   }
   if (kind === "solo") {
-    el.textContent = "單軌試聽是原始分軌，沒有做等響度配對。";
+    el.textContent = L("單軌試聽是原始分軌，沒有做等響度配對。", "A solo plays the original stem, without level matching.");
     return;
   }
   if (!mon) {
-    el.textContent = "比較音量：這個工作階段還沒有等響度比較（重新混音後才會有）。輸出的音量與檔案不受影響。";
+    el.textContent = L("比較音量：這個工作階段還沒有等響度比較（重新混音後才會有）。輸出的音量與檔案不受影響。",
+      "Comparison level: this session has no level-matched comparison yet (mix again to get one). Your output level and files are not affected.");
     return;
   }
   if (mon.status !== "matched") {
     const reason = mon.reason || "";
     if (reason === "remixed-required") {
-      el.textContent = "比較音量：這個工作階段還沒有等響度比較（重新混音後才會有）。輸出的音量與檔案不受影響。";
+      el.textContent = L("比較音量：這個工作階段還沒有等響度比較（重新混音後才會有）。輸出的音量與檔案不受影響。",
+      "Comparison level: this session has no level-matched comparison yet (mix again to get one). Your output level and files are not affected.");
     } else if (reason === "file-incomplete") {
-      el.textContent = "比較音量：等響度比較的檔案不完整，請重新混音。輸出的音量與檔案不受影響。";
+      el.textContent = L("比較音量：等響度比較的檔案不完整，請重新混音。輸出的音量與檔案不受影響。",
+        "Comparison level: the level-matched comparison files are incomplete; mix again. Your output level and files are not affected.");
     } else {
-      const missing = (mon.unavailable || []).join("、");
-      el.textContent = `比較音量：${missing || "其中一側"}無法量測音量（靜音或太短），這不是等響度比較。輸出的音量與檔案不受影響。`;
+      const missing = (mon.unavailable || []).join(L("、", ", "));
+      el.textContent = L(`比較音量：${missing || "其中一側"}無法量測音量（靜音或太短），這不是等響度比較。輸出的音量與檔案不受影響。`,
+        `Comparison level: ${missing || "one side"} could not be measured (silent or too short), so this is not a level-matched comparison. Your output level and files are not affected.`);
     }
     return;
   }
   const level = Number(mon.level_lufs).toFixed(1);
   const exported = Number(mon.export_lufs).toFixed(1);
   const off = Number(mon.level_offset_db || 0);
-  const delta = off <= -0.05 ? `，比輸出低 ${Math.abs(off).toFixed(1)} dB` : "";
+  const delta = off <= -0.05 ? L(`，比輸出低 ${Math.abs(off).toFixed(1)} dB`, `, ${Math.abs(off).toFixed(1)} dB below the output`) : "";
   const head = mon.headroom_db == null ? ""
-    : `，離真峰值上限還有 ${Number(mon.headroom_db).toFixed(1)} dB`;
-  el.textContent =
+    : L(`，離真峰值上限還有 ${Number(mon.headroom_db).toFixed(1)} dB`, `, ${Number(mon.headroom_db).toFixed(1)} dB below the true-peak ceiling`);
+  el.textContent = L(
     `比較音量：${level} LUFS（輸出 ${exported} LUFS${delta}）。` +
-    `「混音後」與「原始總和」是同一個音量，各自只調整固定音量${head}。`;
+    `「混音後」與「原始總和」是同一個音量，各自只調整固定音量${head}。`,
+    `Comparison level: ${level} LUFS (output ${exported} LUFS${delta}). ` +
+    `“Mix” and “Raw sum” play at the same level, each with only a fixed gain change${head}.`);
 }
 
 function setAB(kind, opts) {
@@ -2003,7 +2262,7 @@ $("tracks").addEventListener("click", async (ev) => {
       pbtn.closest("td").querySelector("span").textContent = pansInfo[id].toFixed(2);
       $("result").classList.add("stale");
       invalidateComparison();
-      $("status").textContent = "已調整 pan，重新混音後生效";
+      $("status").textContent = L("已調整 pan，重新混音後生效", "Pan changed. Mix again to apply.");
     } catch (e) {
       $("status").innerHTML = `<span class="err">${e.message}</span>`;
     }
@@ -2026,7 +2285,7 @@ $("tracks").addEventListener("click", async (ev) => {
       (tracksInfo[id] > 0 ? "+" : "") + tracksInfo[id].toFixed(1);
     $("result").classList.add("stale");
     invalidateComparison();
-    $("status").textContent = "已調整，重新混音後生效";
+    $("status").textContent = L("已調整，重新混音後生效", "Trim changed. Mix again to apply.");
   } catch (e) {
     $("status").innerHTML = `<span class="err">${e.message}</span>`;
   }
@@ -2045,20 +2304,25 @@ $("intensity").addEventListener("input", e => $("intv").textContent = Number(e.t
 $("balance").addEventListener("input", e => {
   balanceExplicit = true;
   $("balv").textContent = Number(e.target.value).toFixed(2);
-  $("balmode").textContent = "手動覆寫";
+  $("balmode").textContent = L("手動覆寫", "Manual override");
   sourceBalanceDefault();
 });
 function sourceBalanceDefault() {
   if (!balanceExplicit) {
     $("balance").value = profileDefault($("sourceprofile").value);
     $("balv").textContent = Number($("balance").value).toFixed(2);
-    $("balmode").textContent = "來源預設";
+    $("balmode").textContent = L("來源預設", "Source default");
   }
-  $("balance-intent").textContent = balanceExplicit ? "手動拉桿優先；來源類型不會覆寫此值。" :
-    $("sourceprofile").value === "balanced_stems" ? "採用你的已平衡分組宣告，預設保留 1.00。" :
-    $("sourceprofile").value === "reference_balance" ? "需同曲、同起點，主要差在音量的粗混；只重建音量比例。pan、EQ或非線性／效果差異太大可能拒絕；未通過回退0.50，手動拉桿優先。" :
-    $("sourceprofile").value === "raw_tracks" ? "原始音軌沿用一般預設 0.50，讓風格參與平衡。" :
-    "自動：僅同曲、對齊的參考曲能重建來源總和時保留 1.00；其餘維持 0.50。不是音質判斷。";
+  $("balance-intent").textContent = balanceExplicit ? L("手動拉桿優先；來源類型不會覆寫此值。",
+      "The manual slider wins; the source type will not override it.") :
+    $("sourceprofile").value === "balanced_stems" ? L("採用你的已平衡分組宣告，預設保留 1.00。",
+      "Using your balanced-stems declaration; keeps 1.00 by default.") :
+    $("sourceprofile").value === "reference_balance" ? L("需同曲、同起點，主要差在音量的粗混；只重建音量比例。pan、EQ或非線性／效果差異太大可能拒絕；未通過回退0.50，手動拉桿優先。",
+      "Needs a rough mix of the same song, starting at the same point, that differs mainly in level; only the level proportions are rebuilt. Large pan, EQ or nonlinear/effect differences may be rejected; if it does not pass it falls back to 0.50. The manual slider wins.") :
+    $("sourceprofile").value === "raw_tracks" ? L("原始音軌沿用一般預設 0.50，讓風格參與平衡。",
+      "Raw tracks use the general default 0.50 so the style takes part in the balance.") :
+    L("自動：僅同曲、對齊的參考曲能重建來源總和時保留 1.00；其餘維持 0.50。不是音質判斷。",
+      "Auto: keeps 1.00 only when an aligned reference of the same song can rebuild the source sum; otherwise 0.50. Not a sound-quality judgement.");
 }
 $("sourceprofile").addEventListener("change", sourceBalanceDefault);
 $("balance-default").onclick = () => { balanceExplicit = false; sourceBalanceDefault(); };
@@ -2104,7 +2368,7 @@ function setTargetControl(value) {
     opt = document.createElement("option");
     opt.value = v;
     opt.dataset.custom = "1";
-    opt.textContent = `${v} LUFS（自訂）`;
+    opt.textContent = L(`${v} LUFS（自訂）`, `${v} LUFS (custom)`);
     sel.appendChild(opt);
   }
   sel.value = v;
@@ -2150,17 +2414,20 @@ function applySavedControls(controls, result) {
   exactControls = {};
   if (!controls) {
     if (!result) {
-      hint.textContent = "這個工作階段沒有已儲存的混音結果，也沒有當時的設定可還原。請為下次混音選擇設定。";
+      hint.textContent = L("這個工作階段沒有已儲存的混音結果，也沒有當時的設定可還原。請為下次混音選擇設定。",
+        "This session has no saved mix result and no settings to restore. Choose settings for the next mix.");
       return;
     }
     // a session saved before the controls were stored: say what is missing
     // instead of pretending the current sliders are what the user picked
     const target = result.target_lufs != null ? fmt(result.target_lufs, 1) : null;
-    hint.textContent = "這個工作階段沒有存下、或存下的設定已損壞，無法還原。" +
-      (target ? `上次結果的實際目標是 ${target} LUFS。` : "") + "請為下次混音選擇設定。";
+    hint.textContent = L("這個工作階段沒有存下、或存下的設定已損壞，無法還原。" +
+      (target ? `上次結果的實際目標是 ${target} LUFS。` : "") + "請為下次混音選擇設定。",
+      "This session's settings were not saved or are damaged, so they cannot be restored. " +
+      (target ? `The last result's actual target was ${target} LUFS. ` : "") + "Choose settings for the next mix.");
     return;
   }
-  hint.textContent = "已還原上次成功混音的設定。";
+  hint.textContent = L("已還原上次成功混音的設定。", "Restored the settings of the last successful mix.");
   if (controls.style && styleLibrary.some(s => s.id === controls.style)) {
     style = controls.style;
     document.querySelectorAll(".style").forEach(el => el.classList.toggle("sel", el.dataset.styleId === style));
@@ -2176,14 +2443,14 @@ function applySavedControls(controls, result) {
     balanceExplicit = true;
     $("balance").value = String(controls.balance_preserve);
     $("balv").textContent = Number(controls.balance_preserve).toFixed(2);
-    $("balmode").textContent = "手動覆寫";
+    $("balmode").textContent = L("手動覆寫", "Manual override");
     exactControls["balance"] = controls.balance_preserve;
   } else {
     // an unset k stays unset: the slider goes back to the source default
     balanceExplicit = false;
     $("balance").value = profileDefault($("sourceprofile").value);
     $("balv").textContent = Number($("balance").value).toFixed(2);
-    $("balmode").textContent = "來源預設";
+    $("balmode").textContent = L("來源預設", "Source default");
   }
   if (controls.blend != null) {
     $("blend").value = String(controls.blend);
@@ -2248,7 +2515,8 @@ async function restore() {
     seedManualRoles(st.manual_roles || {}, st.role_revision);
     hasRef = !!st.has_reference;
     $("refdrop").classList.toggle("set", hasRef);
-    $("refdrop").textContent = hasRef ? "參考曲已儲存，拖入其他歌曲可替換" : "丟一首你喜歡的成品，讓它照那個方向混";
+    $("refdrop").textContent = hasRef ? L("參考曲已儲存，拖入其他歌曲可替換", "Reference saved; drop another song to replace it")
+      : L("丟一首你喜歡的成品，讓它照那個方向混", "Drop in a finished track you like and the mix will lean that way");
     refreshRefButton();
     renderFiles();
     refreshGo();
@@ -2264,7 +2532,8 @@ async function restore() {
     applySavedControls(restoredControls, result);
     $("project-name").value = st.project_name || "";
     if (st.draft_controls) {
-      $("control-hint").textContent = "已還原另存專案時的設定；既有結果仍屬上次成功混音，編輯後請重新混音。";
+      $("control-hint").textContent = L("已還原另存專案時的設定；既有結果仍屬上次成功混音，編輯後請重新混音。",
+        "Restored the settings saved with the project; the existing result is still from the last successful mix. Mix again after editing.");
     }
     if (!restoredControls || restoredControls.reverb_amount == null) {
       // the session's own reverb amount is known even without the snapshot:
@@ -2272,7 +2541,7 @@ async function restore() {
       seedReverb(st.reverb_amount ?? 1);
     }
     if (st.has_mix) {
-      $("status").textContent = "已還原上一次的結果";
+      $("status").textContent = L("已還原上一次的結果", "Restored the last result");
     }
     // a saved grouping we cannot vouch for is reported, never guessed at
     if (st.capture_groups_error) {
@@ -2299,7 +2568,7 @@ async function boot() {
     refreshRefButton();
     await restore();
     try { await refreshProjects(); }
-    catch (e) { $("project-status").textContent = `無法讀取已保存專案：${e.message}`; }
+    catch (e) { $("project-status").textContent = L(`無法讀取已保存專案：${e.message}`, `Could not load saved projects: ${e.message}`); }
   } finally {
     projectLoading = false;
     setProjectBusy(false);

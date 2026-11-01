@@ -13,7 +13,7 @@ function extract(name) {
   const hi=source.indexOf('\n}',lo);assert(hi>lo,name+' unterminated');
   return source.slice(lo,hi+2);
 }
-function fixture(response,decl=[{id:'room',members:['a','b'],pan:0}]) {
+function fixture(response,decl=[{id:'room',members:['a','b'],pan:0}],lang='en') {
   const counts={pause:0,load:0,play:0};const hidden=new Set();
   const player={src:'old.wav',paused:false,currentTime:42,duration:100,
     pause(){this.paused=true;counts.pause++},
@@ -22,7 +22,9 @@ function fixture(response,decl=[{id:'room',members:['a','b'],pan:0}]) {
   const result={classList:{add(c){hidden.add(c)},contains(c){return hidden.has(c)}}};
   const status={textContent:'old success',innerHTML:'',appendChild(c){this.child=c}};
   const elements={player,result,status,abraw:{disabled:false},abnote:{textContent:'matched'}};
+  // the page's language helper, in the language this case runs in
   const ctx={console,sessionId:'fixture',groupSavedDecl:{},$:id=>elements[id],
+    LANG:lang,L:(zh,en)=>lang==='zh'?zh:en,
     document:{createElement:()=>({className:'',textContent:''})},
     captureGroupsPayload:()=>decl,api:async()=>{if(response instanceof Error)throw response;return response;}};
   vm.createContext(ctx);
@@ -32,19 +34,20 @@ function fixture(response,decl=[{id:'room',members:['a','b'],pan:0}]) {
 }
 (async()=>{
   let cases=0;
-  for(const declaration of [
+  for(const [lang,remix] of [['zh',/重新混音/],['en',/mix again/i]]) for(const declaration of [
     [{id:'new-name',members:['a','b'],pan:0}],
     [{id:'room',members:['a','c'],pan:0}],
     [{id:'room',members:['a','b'],pan:.2}],[],
     [{id:'room',members:['b','a'],mode:'stereo_pair',pan:0,trim_db:2}]
   ]) {
-    const f=fixture({changed:true},declaration);
+    const f=fixture({changed:true},declaration,lang);
     assert.equal(await f.ctx.saveGroups(),true);
     assert(f.result.classList.contains('hide'));
     assert.equal(f.player.paused,true);assert.equal(f.player.src,'');
     assert.equal(f.elements.abraw.disabled,true);
     assert.equal(f.state().monitoring,null);assert.equal(f.state().abIntent,null);
-    assert(f.state().abGen>7);assert.match(f.status.textContent,/重新混音/);
+    assert(f.state().abGen>7);assert.match(f.status.textContent,remix);
+    assert.match(f.elements.abnote.textContent,remix);
     assert.equal(f.counts.pause,1);assert.equal(f.counts.load,1);
     // Simulate the old metadata callback arriving after the group edit.
     f.ctx.restoreAfterSwitch(7,'old.wav');assert.equal(f.counts.play,0);

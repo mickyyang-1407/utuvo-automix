@@ -1,0 +1,68 @@
+{
+  "acoustic": {
+    "description": "Natural, dynamic, roomy."
+  },
+  "ambient_space": {
+    "description": "Long space, wider image, light dynamics processing.",
+    "applicability": "A starting point for layering space around sustained sounds, pads and strings.",
+    "caveat": "Uses only the existing shared convolution return and width processing; no shimmer, granular or adaptive space.",
+    "numeric_basis": "Starting values tuned by UTUVO; not a guarantee of sound quality."
+  },
+  "cinematic": {
+    "description": "Wide, deep, big dynamics; long reverb."
+  },
+  "funk_disco": {
+    "description": "Drums and bass up front, tight rhythm.",
+    "applicability": "For rhythmic arrangements where drums, bass and harmony instruments answer each other.",
+    "caveat": "No beat tracking or automatic groove correction; the balance between parts still depends on the source and the keep amount.",
+    "numeric_basis": "Starting values tuned by UTUVO; not a guarantee of sound quality."
+  },
+  "heavy_rock_metal": {
+    "description": "Guitar contour; keeps definition in dense parts.",
+    "applicability": "For dense arrangements of electric guitars, drums and bass.",
+    "caveat": "No amp simulation or drum replacement; low-crest sources trigger the existing compression safeguard, so still check the master dynamics.",
+    "numeric_basis": "Starting values tuned by UTUVO; not a guarantee of sound quality."
+  },
+  "house_dance": {
+    "description": "Focused low end, brighter and wider.",
+    "applicability": "For electronic dance stems driven by the low end and the drums.",
+    "caveat": "No tempo-synced kick pumping, beat-synced delay or automatic arrangement; do not read the name as promising these.",
+    "numeric_basis": "Starting values tuned by UTUVO; not a guarantee of sound quality."
+  },
+  "indie_pop": {
+    "description": "Midrange and vocal contour, moderate space.",
+    "applicability": "For arrangements carried by guitars, keys and vocals together.",
+    "caveat": "The name does not stand for any artist's sound; adjust to the performance intent and your reference.",
+    "numeric_basis": "Starting values tuned by UTUVO; not a guarantee of sound quality."
+  },
+  "jazz_natural": {
+    "description": "Light compression, natural dynamics.",
+    "applicability": "For jazz and acoustic stems that already carry their own room and dynamics.",
+    "caveat": "Still uses the existing per-track processing and master chain; not a straight pass-through or a rebuild of the live recording.",
+    "numeric_basis": "Starting values tuned by UTUVO; not a guarantee of sound quality."
+  },
+  "lofi": {
+    "description": "Warm, narrow, vintage; rolled-off highs."
+  },
+  "pop_2020s": {
+    "description": "Modern pop: bright, vocal forward, tight low end."
+  },
+  "reggae_groove": {
+    "description": "Thick low end, darker space.",
+    "applicability": "A starting point for arrangements built on the bass-and-rhythm relationship.",
+    "caveat": "Not a dub effects rack: no tempo echo, delay throws or rhythmic feedback.",
+    "numeric_basis": "Starting values tuned by UTUVO; not a guarantee of sound quality."
+  },
+  "rnb_soul": {
+    "description": "Vocal forward, warm groove.",
+    "applicability": "For stems where rhythm and vocals weigh equally; keeps the backing supportive.",
+    "caveat": "Not a recreation of any particular era, artist or gear; check dense vocals with a level-matched A/B.",
+    "numeric_basis": "Starting values tuned by UTUVO; not a guarantee of sound quality."
+  },
+  "rock": {
+    "description": "Thick mids, punchy drums, wide guitars."
+  },
+  "trap": {
+    "description": "Deep 808s, crisp hats, vocal up close."
+  }
+}

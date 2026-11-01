@@ -989,7 +989,7 @@ def write_report(path: str, plan: dict, report: dict, stems: list) -> None:
         if tone:
             lines.append(f"- tone analysis: {tone['analysis_method']['id']}; {tone['band_count']} fixed common bands; {tone['baseline_kind']}")
             if tone['before_db'] is None or tone['after_db'] is None:
-                lines.append("- relative-tone RMS distance: 可比頻帶不足（無相對音色結論）；至少需要兩個共同可比較的頻帶。")
+                lines.append("- relative-tone RMS distance: not enough comparable bands (no relative-tone conclusion); at least two common comparable bands are needed.")
             else:
                 lines.append(f"- relative-tone RMS distance: {tone['before_db']} -> {tone['after_db']} dB. {tone['diagnostic']}")
             lines.append("- This is physical spectral-shape distance, not a perceptual quality score.")

@@ -115,5 +115,5 @@ def test_insufficient_common_support_receipt_has_no_null_distance_text(tmp_path)
     pipeline.note_reference_tone(p,a,r)
     assert r['reference_tone']['before_db'] is None and r['reference_tone']['after_db'] is None
     path=tmp_path/'receipt.md';render.write_report(str(path),p,r,[s]);text=path.read_text()
-    assert '可比頻帶不足（無相對音色結論）' in text
+    assert 'not enough comparable bands (no relative-tone conclusion)' in text
     assert 'None -> None' not in text

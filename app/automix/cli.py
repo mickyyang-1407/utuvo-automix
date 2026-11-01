@@ -279,13 +279,16 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     preset_dir = args.preset_dir or _default_preset_dir()
 
     if args.list_styles:
+        english = planner.style_text_en(preset_dir)
         for name in _styles(preset_dir):
             p = planner.load_preset(name, preset_dir)
-            print(f"{name:<12} {p.get('name', ''):<16} {p.get('description', '')}")
-            intent = p.get("intent") or {}
-            for key, label in (("applicability", "適用"), ("caveat", "限制"), ("numeric_basis", "數值")):
-                if intent.get(key):
-                    print(f"  {label}: {intent[key]}")
+            # the presets are written in Chinese; print the English text when there is one
+            text = {**(p.get("intent") or {}), "description": p.get("description", ""),
+                    **(english.get(p["id"]) or {})}
+            print(f"{name:<16} {p.get('name', ''):<26} {text['description']}")
+            for key, label in (("applicability", "fits"), ("caveat", "caveat"), ("numeric_basis", "numbers")):
+                if text.get(key):
+                    print(f"  {label}: {text[key]}")
         return 0
 
     def say(msg: str) -> None:

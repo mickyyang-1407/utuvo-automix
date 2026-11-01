@@ -127,6 +127,8 @@ const MATCHED = {
 
 function harness(options) {
   const opts = options || {};
+  // the page's language helper; the page defaults to English
+  const lang = opts.lang || "en";
   const els = {};
   const $ = (id) => (els[id] = els[id] || fakeElement(id));
   const player = fakePlayer();
@@ -142,6 +144,8 @@ function harness(options) {
     monitoring: opts.monitoring === undefined ? MATCHED : opts.monitoring,
     document: { getElementById: $ },
     drawWave: (kind) => { waves.push(kind); },
+    LANG: lang,
+    L: (zh, en) => (lang === "zh" ? zh : en),
   };
   vm.createContext(sandbox);
   vm.runInContext(extractBlock(), sandbox);
@@ -232,15 +236,29 @@ test("the comparison plays the level-matched pair", () => {
   assert.deepStrictEqual(h.waves, ["monitor_mix", "monitor_raw"]);
 });
 
-test("without a matched pair the raw comparison is not offered", () => {
-  const h = harness({ monitoring: null });
-  h.sandbox.refreshABState();
-  assert.strictEqual(h.$("abraw").disabled, true, "the raw button is still live");
-  h.sandbox.setAB("raw");
-  assert.ok(h.player.src.indexOf("monitor/raw") < 0,
-    "the raw view was played anyway");
-  assert.ok(/重新混音/.test(h.$("abnote").textContent),
-    h.$("abnote").textContent);
+for (const [lang, remix] of [["zh", /重新混音/], ["en", /mix again/i]]) {
+  test(`without a matched pair the raw comparison is not offered (${lang})`, () => {
+    const h = harness({ monitoring: null, lang });
+    h.sandbox.refreshABState();
+    assert.strictEqual(h.$("abraw").disabled, true, "the raw button is still live");
+    assert.ok(remix.test(h.$("abraw").title), h.$("abraw").title);
+    h.sandbox.setAB("raw");
+    assert.ok(h.player.src.indexOf("monitor/raw") < 0,
+      "the raw view was played anyway");
+    assert.ok(remix.test(h.$("abnote").textContent),
+      h.$("abnote").textContent);
+  });
+}
+
+test("the matched note reports the levels in either language", () => {
+  const zh = harness({ lang: "zh" });
+  const en = harness({ lang: "en" });
+  zh.sandbox.setAB("mix");
+  en.sandbox.setAB("mix");
+  assert.ok(/比較音量：-12\.3 LUFS（輸出 -9\.1 LUFS，比輸出低 3\.2 dB）/.test(zh.$("abnote").textContent),
+    zh.$("abnote").textContent);
+  assert.ok(/^Comparison level: -12\.3 LUFS \(output -9\.1 LUFS, 3\.2 dB below the output\)\./.test(en.$("abnote").textContent),
+    en.$("abnote").textContent);
 });
 
 test("a pause the user made is not undone by a later switch", () => {

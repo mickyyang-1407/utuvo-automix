@@ -812,7 +812,7 @@ def _save_project(sess: Session, root: str, name, controls) -> dict:
     final = os.path.join(root, project_id)
     stage = tempfile.mkdtemp(prefix=".project-stage-", dir=root)
     saved_at = time.time()
-    name = name.strip() or "未命名專案"
+    name = name.strip() or "Untitled project"
     try:
         _copy_project_tree(sess.dir, stage)
         sess.write_manifest(os.path.join(stage, Session.MANIFEST),
@@ -842,7 +842,7 @@ def _list_projects(root: str) -> list[dict]:
             saved_at = _saved_number(data.get("saved_at"), 0.0)
             if saved_at is None:
                 continue
-            projects.append({"id": name, "name": str(data.get("project_name") or "未命名專案"),
+            projects.append({"id": name, "name": str(data.get("project_name") or "Untitled project"),
                              "saved_at": saved_at})
         except (OSError, ValueError):
             continue  # do not list a snapshot whose manifest cannot be read
@@ -911,6 +911,7 @@ def _styles() -> list[dict]:
     out = []
     if not os.path.isdir(PRESET_DIR):
         return out
+    english = planner.style_text_en(PRESET_DIR)
     for name in sorted(os.listdir(PRESET_DIR)):
         if not name.endswith(".json"):
             continue
@@ -924,6 +925,7 @@ def _styles() -> list[dict]:
                 "name": p.get("name", p["id"]),
                 "description": p.get("description", ""),
                 "intent": p.get("intent"),
+                "en": english.get(p["id"]),
                 "target_lufs": p.get("target_lufs"),
                 "true_peak_db": p.get("true_peak_db"),
             }

@@ -66,7 +66,7 @@
   },
   "intent": {
     "applicability": "適合貝斯與節奏關係突出的編曲起點。",
-    "caveat": "不是Dub效果器：沒有tempo echo、delay throw或節奏式回授。 來源只代表一般意圖與監聽原則，不是Reggae配方。",
+    "caveat": "不是Dub效果器：沒有tempo echo、delay throw或節奏式回授。",
     "numeric_basis": "UTUVO自己調出來的起點數值，不是音質保證。",
     "source_refs": []
   }

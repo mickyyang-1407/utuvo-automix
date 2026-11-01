@@ -217,6 +217,22 @@ def _validate_style_intent(intent: dict) -> None:
             raise PlanError("style source reference requires title, https url, principle and access")
 
 
+def style_text_en(preset_dir: str | None = None) -> dict:
+    """English texts of the built-in styles (the presets are written in Chinese).
+
+    Display only: the planner never reads them, so they cannot change a mix.
+    """
+    if preset_dir is None:
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        preset_dir = os.path.join(os.path.dirname(here), "presets")
+    try:
+        with open(os.path.join(preset_dir, "i18n", "en.json"), encoding="utf-8") as fh:
+            table = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return table if isinstance(table, dict) else {}
+
+
 def load_preset(style: str, preset_dir: str | None = None) -> dict:
     """Accept either a style id (``pop_2020s``) or a path to a preset JSON."""
     if preset_dir is None:

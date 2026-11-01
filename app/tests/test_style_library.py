@@ -33,9 +33,9 @@ def test_exact_fourteen_ids_shared_cli_server(capsys):
     output = capsys.readouterr().out
     for row in rows:
         assert row['id'] in output and row['description']
-        if row['id'] in NEW:
-            assert row['intent']['caveat'] in output
-            assert row['intent']['numeric_basis'] in output
+        if row['id'] in NEW:  # the command line prints the English text of the style
+            assert row['en']['caveat'] in output
+            assert row['en']['numeric_basis'] in output
 
 
 def test_existing_six_numerical_states_unchanged():
@@ -153,3 +153,18 @@ def test_a_restored_old_result_no_longer_carries_names():
     assert server._without_source_refs({'style': {'id': 'x'}}) == {'style': {'id': 'x'}}
     assert server._without_source_refs({'style': 'pop_2020s'}) == {'style': 'pop_2020s'}
     assert server._without_source_refs([1]) == [1]
+
+
+def test_every_style_has_english_text_for_the_ui_and_the_command_line(capsys):
+    import re
+    english = plan.style_text_en()
+    assert set(english) == NEW | LEGACY
+    for id, text in english.items():
+        assert text['description']
+        assert not re.search('[一-鿿]|https?:', json.dumps(text, ensure_ascii=False)), id
+        if plan.load_preset(id).get('intent'):
+            assert set(text) == {'description', 'applicability', 'caveat', 'numeric_basis'}, id
+    assert {row['id']: row['en'] for row in server._styles()} == english
+    assert cli.main(['--list-styles']) == 0
+    listed = capsys.readouterr().out
+    assert not re.search('[一-鿿]', listed) and len(listed.splitlines()) >= 14
