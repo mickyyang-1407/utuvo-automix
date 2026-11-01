@@ -42,8 +42,8 @@ GROUPS = [{"id": "guitar-capture", "members": ["music", "mic_b"], "pan": 0.375}]
 #: the same group with a manual pan and a manual trim on one member
 MANUAL = {"pans": {"music": 0.0}, "trims": {"music": 2.25}}
 
-#: the R25 reference plans and rendered audio live next to this source tree
-REFERENCE_DIR = Path(__file__).resolve().parents[3]
+#: the R25 reference plans and the SHA-256 of the audio they rendered
+REFERENCE_DIR = Path(__file__).resolve().parent / "r25_reference"
 
 
 # ------------------------------------------------------------------ fixtures
@@ -157,17 +157,22 @@ def _executable(plan: dict) -> dict:
 
 
 def _r25(case: str) -> dict:
-    path = REFERENCE_DIR / f"OLD-{case}-plan.json"
-    if not path.exists():
-        pytest.skip(f"the R25 reference plan for {case!r} is not next to this source")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads((REFERENCE_DIR / f"OLD-{case}-plan.json").read_text(encoding="utf-8"))
 
 
-def _counterexample() -> dict:
-    path = REFERENCE_DIR / "BASELINE-COUNTEREXAMPLE.json"
-    if not path.exists():
-        pytest.skip("the R25 counterexample record is not next to this source")
-    return json.loads(path.read_text(encoding="utf-8"))
+def _r25_wav_sha(case: str) -> str:
+    record = json.loads((REFERENCE_DIR / "r25-audio-sha256.json").read_text(encoding="utf-8"))
+    return record["wav_sha256"][case]
+
+
+def _without_ratio_law(plan: dict) -> dict:
+    """R104 added ``ratio_law`` to every compressor; R25 plans predate it.  A
+    plan without the field still renders the R25 way, so it is set aside here."""
+    plan = json.loads(json.dumps(plan))
+    for block in plan.get("tracks", []) + list(plan.get("buses", {}).values()):
+        if isinstance(block.get("comp"), dict):
+            block["comp"].pop("ratio_law", None)
+    return plan
 
 
 def _sha(path) -> str:
@@ -188,6 +193,7 @@ def _duplicate_pairs(plan: dict) -> set:
 
 def test_the_plan_without_a_group_is_the_r25_plan():
     plan, _, _ = _mix(_baseline_stems())
+    plan = _without_ratio_law(plan)
     r25 = _r25("none")
     assert _executable(plan) == _executable(r25)
     assert plan["unmask"]["targets"] == r25["unmask"]["targets"]
@@ -201,12 +207,14 @@ def test_the_plan_without_a_group_is_the_r25_plan():
 
 def test_the_grouped_plan_keeps_the_r25_numbers():
     plan, _, _ = _mix(_baseline_stems(), capture_groups=GROUPS)
+    plan = _without_ratio_law(plan)
     r25 = _r25("group")
     assert _executable(plan) == _executable(r25)
 
 
 def test_the_manual_plan_keeps_the_r25_numbers():
     plan, _, _ = _mix(_baseline_stems(), capture_groups=GROUPS, **MANUAL)
+    plan = _without_ratio_law(plan)
     r25 = _r25("manual")
     assert _executable(plan) == _executable(r25)
 
@@ -220,15 +228,14 @@ def test_the_manual_plan_keeps_the_r25_numbers():
     ],
 )
 def test_the_rendered_audio_is_the_r25_audio(tmp_path, case, options):
-    record = _counterexample()
-    _, audio, _ = _mix(_baseline_stems(), **options)
+    # today's plan, compressed the R25 way, renders R25's audio to the bit
+    plan, _, _ = _mix(_baseline_stems(), **options)
+    rev = _preset().get("reverb") or {}
+    reverb = {"decay_s": float(rev.get("decay_s", 1.6)), "predelay_ms": float(rev.get("pre_delay_ms", 20.0))}
+    audio, _ = render.render(_baseline_stems(), _without_ratio_law(plan), reverb)
     out = tmp_path / f"{case}.wav"
     render.write_wav24(str(out), audio, SR)
-    assert _sha(out) == record["cases"][_case_index(case)]["WAV_SHA"]
-
-
-def _case_index(case: str) -> int:
-    return {"none": 0, "group": 1, "manual": 2}[case]
+    assert _sha(out) == _r25_wav_sha(case)
 
 
 # ------------------------------------------- what a protected member claims

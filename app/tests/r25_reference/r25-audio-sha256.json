@@ -1,0 +1,8 @@
+{
+ "note": "SHA-256 of the 24-bit WAV each R25 plan rendered to (the R25 counterexample record)",
+ "wav_sha256": {
+  "none": "b63c98cd50d8ed8746b3a59866da1adfb236e43ed6c2e0838803bdb307eef150",
+  "group": "2146033238b64b80298f568cba8d81ed1c0fd3bd62eedc3fe9edb23b086382fe",
+  "manual": "85150c9a7e534ce35d26e3c87b1ba39af71b1505ddf391e80a796c16e8879c4b"
+ }
+}

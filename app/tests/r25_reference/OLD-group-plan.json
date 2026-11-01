@@ -1,0 +1,358 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-10-30T11:39:44+00:00",
+  "generator": "utuvo-automix 0.1.0",
+  "source": {
+    "sample_rate": 24000,
+    "frames": 192000,
+    "duration_s": 8.0,
+    "excluded_stems": [],
+    "stems": [
+      {
+        "id": "music",
+        "file": "music.wav",
+        "role": "guitar_electric",
+        "confidence": 0.55,
+        "sample_rate": 24000,
+        "channels": 2,
+        "duration_s": 8.0
+      },
+      {
+        "id": "mic_b",
+        "file": "mic_b.wav",
+        "role": "guitar_electric",
+        "confidence": 0.55,
+        "sample_rate": 24000,
+        "channels": 2,
+        "duration_s": 8.0
+      },
+      {
+        "id": "lead",
+        "file": "lead.wav",
+        "role": "lead_vocal",
+        "confidence": 0.55,
+        "sample_rate": 24000,
+        "channels": 2,
+        "duration_s": 8.0
+      }
+    ]
+  },
+  "style": {
+    "id": "pop_2020s",
+    "version": 1,
+    "intensity": 1.0,
+    "balance_preserve": 1.0,
+    "source_balance": {
+      "requested": "raw_tracks",
+      "resolved": "raw_tracks",
+      "requested_balance_preserve": 1.0,
+      "balance_preserve": 1.0,
+      "origin": "explicit",
+      "proof": {
+        "method": "aligned_stereo_gain_fit_v1",
+        "passed": false,
+        "reason": "not_required_for_explicit_balance_preserve"
+      }
+    },
+    "preset_file": null,
+    "name": "Pop 2020s",
+    "blend": 0.0,
+    "crest_target_db": 9.0,
+    "mono_below_hz": 120
+  },
+  "tracks": [
+    {
+      "id": "music",
+      "role": "guitar_electric",
+      "gain_db": 0.0,
+      "pan": 0.375,
+      "hpf_hz": 20.0,
+      "eq": [],
+      "saturation": 0.0,
+      "sends": {
+        "plate": 0.0
+      },
+      "width": 1.0,
+      "confidence": 0.55,
+      "evidence": [
+        "role=guitar_electric from user (confidence 0.55)",
+        "stem lufs -13.9, crest 5.3, centroid 1010 Hz",
+        "style gain for guitar_electric -5.0 dB",
+        "ride ±2.5 dB over 2 points (spread 0.0 dB)",
+        "spread to +0.10 around the centre because 2 tracks share the guitar_electric role",
+        "vocal masking: dynamic 1.50 dB max at 3200 Hz; supported overlap 25.6%; frozen pre-compressor curve",
+        "post-track loudness target = source LUFS + current gain, source window 1:192000, correction capped at +/-6 dB (pre-bus)",
+        "capture group 'guitar-capture': common pan +0.38 (was +0.10 from the automatic placement)"
+      ],
+      "source_file": "music.wav"
+    },
+    {
+      "id": "mic_b",
+      "role": "guitar_electric",
+      "gain_db": 0.0,
+      "pan": 0.375,
+      "hpf_hz": 20.0,
+      "eq": [],
+      "saturation": 0.0,
+      "sends": {
+        "plate": 0.0
+      },
+      "width": 1.0,
+      "confidence": 0.55,
+      "evidence": [
+        "role=guitar_electric from user (confidence 0.55)",
+        "stem lufs -17.0, crest 5.3, centroid 1010 Hz",
+        "style gain for guitar_electric -5.0 dB",
+        "ride ±2.5 dB over 2 points (spread 0.0 dB)",
+        "spread to -0.10 around the centre because 2 tracks share the guitar_electric role",
+        "vocal masking: dynamic 1.50 dB max at 3200 Hz; supported overlap 25.6%; frozen pre-compressor curve",
+        "post-track loudness target = source LUFS + current gain, source window 1:192000, correction capped at +/-6 dB (pre-bus)",
+        "capture group 'guitar-capture': common pan +0.38 (was -0.10 from the automatic placement)"
+      ],
+      "source_file": "mic_b.wav"
+    },
+    {
+      "id": "lead",
+      "role": "lead_vocal",
+      "gain_db": 0.0,
+      "pan": 0.0,
+      "hpf_hz": 90.0,
+      "eq": [],
+      "saturation": 0.1,
+      "sends": {
+        "plate": 0.099
+      },
+      "width": 1.0,
+      "confidence": 0.55,
+      "evidence": [
+        "role=lead_vocal from user (confidence 0.55)",
+        "stem lufs -15.7, crest 4.9, centroid 1233 Hz",
+        "style gain for lead_vocal +0.0 dB",
+        "ride ±2.5 dB over 7 points (spread 0.3 dB)",
+        "post-track loudness target = source LUFS + current gain, source window 48001:96000, correction capped at +/-6 dB (pre-bus)"
+      ],
+      "source_file": "lead.wav",
+      "ride": [
+        [
+          0.5,
+          0.21
+        ],
+        [
+          2.0,
+          -0.06
+        ],
+        [
+          3.0,
+          0.19
+        ],
+        [
+          3.5,
+          -0.02
+        ],
+        [
+          5.0,
+          0.25
+        ],
+        [
+          6.0,
+          0.0
+        ],
+        [
+          7.5,
+          0.0
+        ]
+      ],
+      "level_match": {
+        "mode": "active_lufs_blend",
+        "source_lufs": -15.68,
+        "amount": 1.0,
+        "max_gain_db": 6.0,
+        "start_frame": 48001,
+        "end_frame": 96000
+      }
+    }
+  ],
+  "buses": {
+    "drum": {
+      "width": 1.0,
+      "comp": {
+        "threshold_db": -17.5,
+        "ratio": 2.69,
+        "attack_ms": 28.2,
+        "release_ms": 201.0,
+        "makeup": {
+          "mode": "half_average_reduction",
+          "cap_db": 12.0
+        }
+      }
+    },
+    "bass": {
+      "width": 1.0,
+      "comp": {
+        "threshold_db": -14.9,
+        "ratio": 2.31,
+        "attack_ms": 29.8,
+        "release_ms": 189.0,
+        "makeup": {
+          "mode": "half_average_reduction",
+          "cap_db": 12.0
+        }
+      }
+    },
+    "music": {
+      "width": 1.0,
+      "comp": {
+        "threshold_db": -14.5,
+        "ratio": 2.12,
+        "attack_ms": 30.5,
+        "release_ms": 184.0,
+        "makeup": {
+          "mode": "half_average_reduction",
+          "cap_db": 12.0
+        },
+        "threshold_offset_db": -2.3
+      },
+      "saturation": 0.05
+    },
+    "vocal": {
+      "width": 1.0,
+      "comp": {
+        "threshold_db": -19.2,
+        "ratio": 3.06,
+        "attack_ms": 26.8,
+        "release_ms": 212.0,
+        "makeup": {
+          "mode": "half_average_reduction",
+          "cap_db": 12.0
+        },
+        "threshold_offset_db": -3.5
+      }
+    },
+    "fx": {
+      "width": 1.0
+    },
+    "master": {
+      "eq": [
+        {
+          "type": "low_shelf",
+          "freq": 120.0,
+          "gain_db": 1.5,
+          "q": 0.7,
+          "enabled": true
+        },
+        {
+          "type": "bell",
+          "freq": 300.0,
+          "gain_db": -0.5,
+          "q": 0.9,
+          "enabled": true
+        },
+        {
+          "type": "bell",
+          "freq": 1000.0,
+          "gain_db": 0.5,
+          "q": 0.8,
+          "enabled": true
+        },
+        {
+          "type": "bell",
+          "freq": 3500.0,
+          "gain_db": 1.2,
+          "q": 0.9,
+          "enabled": true
+        },
+        {
+          "type": "high_shelf",
+          "freq": 9000.0,
+          "gain_db": 1.5,
+          "q": 0.7,
+          "enabled": true
+        }
+      ],
+      "target_lufs": -20.0,
+      "true_peak_db": -1.0,
+      "limiter": {
+        "ceiling_db": -1.0
+      },
+      "mono_below_hz": 120.0,
+      "width": 1.0,
+      "width_target": null,
+      "width_limit": 1.4,
+      "comp": {
+        "threshold_db": -17.9,
+        "ratio": 2.75,
+        "attack_ms": 28.0,
+        "release_ms": 202.0,
+        "makeup": {
+          "mode": "half_average_reduction",
+          "cap_db": 12.0
+        }
+      }
+    }
+  },
+  "unmask": {
+    "mode": "frozen_vocal_unmask_v1",
+    "method": "stereo_mean_square_hann100ms_hop50ms_v1",
+    "intensity": 1.0,
+    "max_targets": 2,
+    "targets": [
+      "music",
+      "mic_b"
+    ],
+    "priority_source_ids": [
+      "lead"
+    ],
+    "diagnostics": [],
+    "policy": {
+      "frame_s": 0.1,
+      "hop_s": 0.05,
+      "attack_ms": 50,
+      "release_ms": 150,
+      "activity_floor_dbfs": -60,
+      "activity_relative_db": -30,
+      "presence_floor_dbfs": -65,
+      "vocal_presence_over_mid_db": -18,
+      "competition_margin_db": -10,
+      "instrument_cap_db": 1.5,
+      "other_cap_db": 0.8,
+      "multiple_leads": "sum of planned stereo powers; no phase cancellation"
+    }
+  },
+  "sections": [],
+  "section_contrast": {
+    "factor": 1.0,
+    "reference_db": null
+  },
+  "reverb": {
+    "amount": 0.18,
+    "decay_s": 1.6,
+    "pre_delay_ms": 28.0,
+    "high_cut_hz": 8000.0,
+    "scale": 1.0,
+    "manual_amount": 0.0
+  },
+  "warnings": [
+    "music and mic_b carry the same performance (envelope r=1.000). If they are a stereo pair that is expected; if they are two copies of one part, mute one.",
+    "compression skipped on 3 already-dense stem(s) (crest below 7.0 dB): music.wav, mic_b.wav, lead.wav"
+  ],
+  "capture_groups": {
+    "mode": "declared_capture_group",
+    "groups": [
+      {
+        "id": "guitar-capture",
+        "members": [
+          "music",
+          "mic_b"
+        ],
+        "protected_tracks": [
+          "music",
+          "mic_b"
+        ],
+        "pan": 0.375,
+        "common_send": 0.0,
+        "notes": []
+      }
+    ],
+    "boundary": "Protection applies to the members before the common bus/master: no per-member ride, high-pass, EQ, de-esser, compression, saturation, width or loudness matching, and one common pan. It does not align time, flip polarity or remove bleed, and it does not change the common bus/master processing, so the finished mix is not guaranteed to be identical to the imported waveforms."
+  }
+}
