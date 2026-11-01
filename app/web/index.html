@@ -164,39 +164,110 @@
   .lang{margin-left:auto;display:flex;align-items:center;gap:4px;font-size:12px;color:var(--dim)}
   .lang button{padding:3px 9px;font-size:12px;border-radius:7px;background:transparent;color:var(--dim)}
   .lang button.on{border-color:var(--accent);color:var(--accent)}
+  /* ---------- app shell: sidebar + overview (R107) ---------- */
+  :root{--side:#121419;--drums:#e7a23f;--bass:#40b3a4;--vocals:#8f8df2;--music:#5d9ee3;--fx:#8b94a4}
+  body{background:#0f1115}
+  .app{display:grid;grid-template-columns:240px minmax(0,1fr);min-height:100vh}
+  .side{position:sticky;top:0;height:100vh;overflow-y:auto;background:var(--side);
+        border-right:1px solid var(--line);padding:20px 12px 16px;display:flex;flex-direction:column;gap:1px}
+  .side .brand{font-size:19px;font-weight:700;letter-spacing:.2px;padding:0 10px 14px}
+  .side .grp{font-size:11.5px;color:var(--dim);margin:14px 10px 4px;font-weight:600}
+  .nav{display:flex;align-items:center;gap:10px;width:100%;padding:7px 10px;border-radius:9px;border:0;
+       background:transparent;color:var(--ink);font-size:14px;text-align:left;cursor:pointer}
+  .nav:hover{background:#191c22;border:0}
+  .nav.on{background:var(--panel2)}
+  .nav .ico{flex:0 0 24px;height:24px;border-radius:7px;display:grid;place-items:center}
+  .nav .ico svg{width:15px;height:15px;stroke:#0e1013;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+  .nav .cnt{margin-left:auto;color:var(--dim);font-size:12.5px;font-variant-numeric:tabular-nums;
+            max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .side .lang{margin:auto 0 0;padding:14px 10px 0}
+  .main{padding:34px 40px 40px;max-width:1120px;width:100%;min-width:0}
+  .hero .eyebrow{color:var(--dim);font-size:17px;margin:0 0 2px}
+  .hero .big{font-size:64px;line-height:1.05;font-weight:700;letter-spacing:-.025em;margin:0;
+             font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+  .hero .sub{color:var(--dim);font-size:15.5px;margin:8px 0 0}
+  .mixbar{display:flex;gap:4px;height:46px;padding:4px;margin-top:24px;border:1px solid var(--line);
+          border-radius:13px;background:var(--panel)}
+  .mixbar .seg{border:0;padding:0;border-radius:8px;min-width:8px;cursor:pointer;transition:none}
+  .mixbar .seg:hover{filter:brightness(1.12)}
+  .mixbar .seg.out{background-image:repeating-linear-gradient(135deg,rgba(14,16,19,.55) 0 2px,transparent 2px 7px)}
+  .mixbar .empty{flex:1;border-radius:8px;background:var(--panel2)}
+  .legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;color:var(--dim);font-size:12.5px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .legend i{width:9px;height:9px;border-radius:3px;display:inline-block}
+  .legend .how{flex-basis:100%;margin-top:2px}
+  .summary{display:flex;align-items:center;gap:16px;margin:22px 0 28px;padding:16px 18px;border-radius:14px;
+           border:1px solid #2c4a3a;background:#14211a}
+  .summary.warn{border-color:#4f4218;background:#211d10}
+  .summary.idle{border-color:var(--line);background:var(--panel)}
+  .summary .mark{flex:0 0 40px;height:40px;border-radius:10px;display:grid;place-items:center;
+                 font-weight:800;font-size:19px;color:#0e1013;background:var(--accent)}
+  .summary.warn .mark{background:var(--warn)}
+  .summary.idle .mark{background:var(--panel2);color:var(--ink);border:1px solid var(--line)}
+  .summary .txt{flex:1;min-width:0}
+  .summary .t{font-weight:650;font-size:15px}
+  .summary .d{color:var(--dim);font-size:13px;margin-top:2px;overflow-wrap:anywhere}
+  .summary button{flex:0 0 auto;padding:8px 16px;font-size:13.5px;border-radius:9px}
+  .card{border-radius:14px;padding:20px 20px 18px;margin-bottom:18px;scroll-margin-top:20px}
+  .card h2{font-size:19px;text-transform:none;letter-spacing:0;color:var(--ink);font-weight:650;margin:0 0 16px}
+  .actionbar{position:sticky;bottom:14px;z-index:5;margin:22px 0 0;display:flex;align-items:center;gap:12px;
+             padding:9px 9px 9px 18px;background:#1a1e25;border:1px solid #333a45;border-radius:15px;
+             box-shadow:0 10px 28px rgba(0,0,0,.5)}
+  .actionbar .what{flex:1;min-width:0;font-size:13.5px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .actionbar .what b{color:var(--ink);font-weight:650}
+  .actionbar #status{flex:0 1 auto;min-width:0;font-size:12.5px;color:var(--dim);overflow-wrap:anywhere}
+  .actionbar #go{padding:11px 22px;border-radius:11px}
+  .actionbar #cancel{padding:10px 16px;border-radius:11px}
+  #control-hint:empty{display:none}
+  #navlist{display:flex;flex-direction:column;gap:1px}
+  /* once stems are in, the drop zone becomes a slim "add more" strip */
+  #sec-stems:has(.file) #drop{padding:12px 16px;display:flex;gap:12px;align-items:baseline;justify-content:center;flex-wrap:wrap}
+  #sec-stems:has(.file) #drop .big{font-size:14px;margin:0}
+  #sec-stems:has(.file) #drop .hint{margin:0!important}
+  #sec-stems:has(.file) #drop .hint + .hint{display:none}
+  @media (max-width:860px){
+    #navlist{flex-direction:row;gap:4px}
+    .file{flex-wrap:wrap;row-gap:6px}
+    .file .name{flex:1 1 100%}
+    .file .badges,.file .lvl,.file select,.file .gname,.file .tag{flex:0 1 auto}
+    #tracks{display:block;overflow-x:auto}
+    .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .app{grid-template-columns:minmax(0,1fr)}
+    .side{position:static;height:auto;flex-direction:row;align-items:center;gap:4px;overflow-x:auto;
+          padding:10px 12px;border-right:0;border-bottom:1px solid var(--line)}
+    .side .brand{padding:0 8px 0 4px}
+    .side .grp{display:none}
+    .nav{width:auto;flex:0 0 auto;padding:6px 9px}
+    .nav .cnt{display:none}
+    .side .lang{margin:0 0 0 auto;padding:0 0 0 8px;flex:0 0 auto}
+    .main{padding:22px 16px 28px}
+    .hero .big{font-size:44px}
+    .actionbar .what{display:none}
+  }
+  @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <h1>Automix</h1>
-    <span class="sub">丟分軌 → 選風格 → 拿混音（本機執行，不上傳雲端）</span>
+<div class="app">
+  <nav class="side" id="side" aria-label="Automix">
+    <div class="brand">Automix</div>
+    <div id="navlist"></div>
     <span class="lang" role="group" aria-label="語言">
       <button type="button" id="lang-en" lang="en">EN</button><span aria-hidden="true">|</span><button type="button" id="lang-zh" lang="zh-Hant">繁中</button>
     </span>
-  </header>
-
-  <div class="card">
-    <h2>本機專案</h2>
-    <div class="row">
-      <div class="ctl">
-        <label for="project-name">專案名稱</label>
-        <input id="project-name" maxlength="120" placeholder="未命名專案">
-      </div>
-      <button id="save-project" disabled>另存專案</button>
-      <div class="ctl">
-        <label for="saved-projects">已保存的專案</label>
-        <select id="saved-projects"><option value="">尚無已保存專案</option></select>
-      </div>
-      <button id="open-project" disabled>開啟專案</button>
-    </div>
-    <div class="hint" id="project-root"></div>
-    <div class="hint">工作階段可能在 12 小時後或超過 40 個時被清理。另存的專案副本會保留素材、設定與結果；開啟時建立新的工作副本。後續編輯請再次另存。</div>
-    <div class="hint" id="project-status" aria-live="polite"></div>
-  </div>
+  </nav>
+<main class="main">
+  <section class="hero" id="overview">
+    <p class="eyebrow" id="hero-eyebrow">丟分軌 → 選風格 → 拿混音（本機執行，不上傳雲端）</p>
+    <h1 class="big" id="hero-big">Automix</h1>
+    <p class="sub" id="hero-sub"></p>
+    <div class="mixbar" id="mixbar"></div>
+    <div class="legend" id="legend"></div>
+    <div class="summary idle" id="summary"></div>
+  </section>
 
   <div id="workspace">
-  <div class="card">
+  <div class="card" id="sec-stems">
     <h2>1 · 分軌</h2>
     <div id="drop">
       <div class="big">把分軌拖進來</div>
@@ -216,7 +287,7 @@
     </div>
   </div>
 
-  <div class="card">
+  <div class="card" id="sec-style">
     <h2>2 · 風格</h2>
     <div class="styles" id="styles"></div>
     <div class="style-info" id="style-info" aria-live="polite"></div>
@@ -261,7 +332,7 @@
     </div>
   </div>
 
-  <div class="card">
+  <div class="card" id="sec-ref">
     <h2>3 · 參考曲（選用）</h2>
     <div class="refdrop" id="refdrop">丟一首你喜歡的成品，讓它照那個方向混</div>
     <input id="refpicker" type="file" accept=".wav,.aif,.aiff,.flac,.mp3,.m4a,.ogg,.opus" class="hide">
@@ -275,11 +346,6 @@
 
   <div class="hint" id="control-hint"></div>
 
-  <div style="display:flex;gap:12px;align-items:center">
-    <button id="go" disabled>開始混音</button>
-    <button id="cancel" class="hide">取消</button>
-    <span class="sub" id="status"></span>
-  </div>
 
   <div class="card hide" id="result">
     <h2>結果</h2>
@@ -307,7 +373,33 @@
   </div>
 
   </div>
+  <div class="card" id="sec-project">
+    <h2>本機專案</h2>
+    <div class="row">
+      <div class="ctl">
+        <label for="project-name">專案名稱</label>
+        <input id="project-name" maxlength="120" placeholder="未命名專案">
+      </div>
+      <button id="save-project" disabled>另存專案</button>
+      <div class="ctl">
+        <label for="saved-projects">已保存的專案</label>
+        <select id="saved-projects"><option value="">尚無已保存專案</option></select>
+      </div>
+      <button id="open-project" disabled>開啟專案</button>
+    </div>
+    <div class="hint" id="project-root"></div>
+    <div class="hint">工作階段可能在 12 小時後或超過 40 個時被清理。另存的專案副本會保留素材、設定與結果；開啟時建立新的工作副本。後續編輯請再次另存。</div>
+    <div class="hint" id="project-status" aria-live="polite"></div>
+  </div>
+
+  <div class="actionbar" id="actionbar">
+    <span class="what" id="action-what"></span>
+    <span class="sub" id="status"></span>
+    <button id="cancel" class="hide">取消</button>
+    <button id="go" disabled>開始混音</button>
+  </div>
   <footer>引擎與 CLI 共用同一套決策；這裡只是外殼。</footer>
+</main>
 </div>
 
 <script>
@@ -534,10 +626,12 @@ function statusError(message, tail = "") {
 function setProjectBusy(value) {
   projectBusy = value;
   $("workspace").inert = value;
+  if ($("actionbar")) $("actionbar").inert = value;
   $("project-name").disabled = value || projectLoading;
   $("save-project").disabled = value || projectLoading;
   $("saved-projects").disabled = value || projectLoading;
   $("open-project").disabled = value || projectLoading || !$("saved-projects").value;
+  if (typeof queueOverview === "function") queueOverview();
 }
 
 async function refreshProjects(selected = "") {
@@ -588,9 +682,9 @@ async function saveProject() {
     $("project-status").textContent = L("請先匯入分軌，再另存專案。", "Import stems before saving a project.");
     return;
   }
-  setProjectBusy(true);
-  $("project-status").textContent = L("正在保存專案副本…", "Saving a project copy…");
   try {
+    setProjectBusy(true);
+    $("project-status").textContent = L("正在保存專案副本…", "Saving a project copy…");
     await settleProjectEdits();
     const saved = await api(`/api/session/${sessionId}/project`, {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -608,17 +702,17 @@ async function saveProject() {
 async function openProject() {
   if (!projectActionReady() || !$("saved-projects").value) return;
   const id = $("saved-projects").value;
-  setProjectBusy(true);
-  $("project-status").textContent = L("正在建立專案工作副本…", "Creating a working copy of the project…");
   try {
+    setProjectBusy(true);
+    $("project-status").textContent = L("正在建立專案工作副本…", "Creating a working copy of the project…");
     await settleProjectEdits(false);
     const opened = await api(`/api/projects/${id}/open`, { method: "POST", body: "" });
     // A normal document load rebuilds all working state for the new session.
     history.replaceState(null, "", location.pathname + location.search + "#s=" + opened.id);
     location.reload();
   } catch (e) {
-    $("project-status").textContent = L(`開啟失敗：${e.message}`, `Could not open the project: ${e.message}`);
     setProjectBusy(false);
+    $("project-status").textContent = L(`開啟失敗：${e.message}`, `Could not open the project: ${e.message}`);
   }
 }
 
@@ -1599,7 +1693,7 @@ function wireDrop(el, onFiles, hotClass) {
 function fmt(v, digits = 2) { return (v >= 0 ? "" : "") + Number(v).toFixed(digits); }
 
 async function run() {
-  if (!stems.length || !style || languageSwitching) return;
+  if (!stems.length || !style || languageSwitching || projectBusy) return;
   // A group that cannot be protected stops the mix here, with a reason the
   // user can act on: the mix would otherwise run without the protection the
   // group claims.
@@ -1712,6 +1806,7 @@ async function run() {
       body
     });
     show(r, ((performance.now() - t0) / 1000).toFixed(1));
+    mixedKey = mixKey();
     // the mix is saved now, so the hint says what happened to it: the older
     // "cannot be restored" wording is no longer true, and naming a superseded
     // result would only be misleading
@@ -1782,6 +1877,7 @@ function balanceWhy(decision) {
   return L("未取得同曲重建證據，保留一般預設", "No same-song rebuild evidence; keeping the general default");
 }
 function show(r, secs) {
+  lastResult = r; lastSeconds = secs;
   // what the published render says about the comparison pair.  A session
   // that has none (an older one) is reported, never guessed at.
   monitoring = r.monitoring || null;
@@ -1818,7 +1914,7 @@ function show(r, secs) {
     $("balv").textContent = Number(shown).toFixed(2);
     $("balmode").textContent = L("來源預設", "Source default");
   }
-  $("result").classList.remove("hide");
+  $("result").classList.remove("hide", "stale");  // a new result is current again
   const cells = [
     [L("響度", "Loudness"), fmt(r.lufs, 2), "LUFS", `${L("目標", "target")} ${fmt(r.target_lufs, 2)}`],
     [L("真峰值", "True peak"), fmt(r.true_peak_db, 2), "dBTP", `${L("上限", "ceiling")} ${fmt(r.ceiling_db, 2)}`],
@@ -1841,8 +1937,8 @@ function show(r, secs) {
         `before → after applying the reference · ${t.band_count} shared bands · ${note}; not a quality score`), "reference-tone"]);
   }
   $("metrics").innerHTML = cells.map(([k, v, u, s, extra = ""]) =>
-    `<div class="m ${extra}"><div class="k">${k}</div><div class="v">${v} <small>${u}</small></div>
-     <div class="k" style="margin-top:4px">${s}</div></div>`).join("");
+    `<div class="m ${esc(extra)}"><div class="k">${esc(k)}</div><div class="v">${esc(v)} <small>${esc(u)}</small></div>
+     <div class="k" style="margin-top:4px">${esc(s)}</div></div>`).join("");
 
   const exp = $("exported");
   if (r.exported && r.exported.length) {
@@ -2554,6 +2650,13 @@ async function restore() {
       // seed it after the restore so the exact value is not lost to rounding
       seedReverb(st.reverb_amount ?? 1);
     }
+    if (result) {
+      // project draft settings that differ from the mix's own are not heard yet
+      const canon = c => JSON.stringify(Object.keys(c).filter(k => k !== "export_stems").sort().map(k => [k, c[k]]));
+      if (st.draft_controls && st.controls && canon(st.draft_controls) !== canon(st.controls))
+        $("result").classList.add("stale");
+      mixedKey = mixKey();
+    }
     if (st.has_mix) {
       $("status").textContent = L("已還原上一次的結果", "Restored the last result");
     }
@@ -2572,7 +2675,280 @@ async function restore() {
   }
 }
 
+/* ---------------------------------------------------------------- overview */
+// The sidebar, the big number, the bar and the summary only *read* the state
+// the rest of the page keeps; they never change a control or a request.
+let lastResult = null, lastSeconds = null;
+let mixedKey = null;  // the mix settings of the result on screen (export choice aside)
+function mixKey() {
+  const b = JSON.parse(runBody());
+  delete b.export_stems;  // exporting stems does not change the mix
+  return JSON.stringify(b);
+}
+const FAMILIES = [
+  ["drums", () => L("鼓", "Drums"), "var(--drums)"],
+  ["bass", () => L("貝斯", "Bass"), "var(--bass)"],
+  ["vocals", () => L("人聲", "Vocals"), "var(--vocals)"],
+  ["music", () => L("樂器", "Instruments"), "var(--music)"],
+  ["fx", () => L("效果與其他", "FX & other"), "var(--fx)"],
+];
+const ROLE_FAMILY = {kick: "drums", snare: "drums", hats: "drums", toms: "drums", cymbals: "drums",
+  drums_full: "drums", bass: "bass", sub_808: "bass", lead_vocal: "vocals", backing_vocal: "vocals",
+  fx: "fx", other: "fx"};
+const familyOf = role => ROLE_FAMILY[role] || (role ? "music" : "fx");
+const ICONS = {
+  overview: '<path d="M4 18V9M10 18V5M16 18v-7M22 18V8"/>',
+  stems: '<path d="M3 7h18M3 12h18M3 17h12"/>',
+  style: '<circle cx="12" cy="12" r="8"/><path d="M12 4v16M4 12h16"/>',
+  ref: '<path d="M5 12a7 7 0 1 0 14 0a7 7 0 1 0-14 0M12 9v3l2 2"/>',
+  result: '<path d="M2 12h3l2-6 4 12 3-9 2 3h6"/>',
+  project: '<path d="M3 7h7l2 2h9v10H3z"/>',
+};
+function styleName(id = style) {
+  const item = styleLibrary.find(s => s.id === id);
+  return item ? item.name || item.id : (id || "");
+}
+function stemStats() {
+  const out = [];
+  stems.forEach(n => {
+    const info = roleInfo[n] || {}, m = info.metrics || {};
+    const excluded = mutedTracks.has(tidOf(n));
+    const issues = [];
+    if (m.silent) issues.push(L("靜音", "silent"));
+    if (m.clipped_ratio > 0.005) issues.push(L("削波", "clipping"));
+    if (!m.silent && m.lufs < -30) issues.push(L("很小聲", "very quiet"));
+    if (!m.silent && m.lufs > -6) issues.push(L("過熱", "hot"));
+    const power = !m.silent && Number.isFinite(m.lufs) ? Math.pow(10, m.lufs / 10) : 0;
+    out.push({name: n, family: familyOf(info.role), excluded, issues, power, pending: !info.metrics});
+  });
+  return out;
+}
+function navTo(id) {
+  const el = $(id);
+  if (!el) return;
+  const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  el.scrollIntoView({behavior: reduce ? "auto" : "smooth", block: "start"});
+}
+function renderNav(stats) {
+  const list = $("navlist");
+  if (!list) return;
+  const resultShown = !$("result").classList.contains("hide");
+  const saved = Math.max(0, $("saved-projects").options.length - 1);
+  const rows = [
+    ["overview", "overview", L("總覽", "Overview"), resultShown && lastResult ? `${Number(lastResult.lufs).toFixed(1).replace("-", "\u2212")} LUFS` : "", "#d7dbe2"],
+    [L("混音", "Mix")],
+    ["sec-stems", "stems", L("分軌", "Stems"), stats.length ? String(stats.length) : "", "var(--music)"],
+    ["sec-style", "style", L("風格", "Style"), styleName(), "var(--vocals)"],
+    ["sec-ref", "ref", L("參考曲", "Reference"), hasRef ? "✓" : L("無", "none"), "var(--bass)"],
+    ["result", "result", L("結果", "Result"), resultShown && lastResult ? `${Number(lastResult.true_peak_db).toFixed(1).replace("-", "\u2212")} dBTP` : "—", "var(--accent)"],
+    [L("專案", "Projects")],
+    ["sec-project", "project", L("本機專案", "Local projects"), saved ? String(saved) : "", "var(--drums)"],
+  ];
+  const active = list.dataset.active || "overview";
+  const hadFocus = list.contains(document.activeElement) ? document.activeElement.dataset.target : null;
+  list.replaceChildren();
+  rows.forEach(r => {
+    if (r.length === 1) {
+      const g = document.createElement("div"); g.className = "grp"; g.textContent = r[0]; list.appendChild(g); return;
+    }
+    const [target, icon, label, count, color] = r;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "nav" + (target === active ? " on" : "");
+    b.dataset.target = target;
+    if (target === "result" && !resultShown) b.disabled = true;
+    const ico = document.createElement("span");
+    ico.className = "ico"; ico.style.background = color;
+    ico.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[icon]}</svg>`;
+    const t = document.createElement("span"); t.textContent = label;
+    const c = document.createElement("span"); c.className = "cnt"; c.textContent = count;
+    b.append(ico, t, c);
+    if (target === active) b.setAttribute("aria-current", "true");
+    b.onclick = () => {
+      list.dataset.active = target; navTo(target); renderNav(stemStats());
+      const again = list.querySelector(`.nav[data-target="${target}"]`);
+      if (again) again.focus({preventScroll: true});
+    };
+    list.appendChild(b);
+  });
+  if (hadFocus) {
+    const back = list.querySelector(`.nav[data-target="${hadFocus}"]`);
+    if (back && !back.disabled) back.focus({preventScroll: true});
+  }
+}
+function renderOverview() {
+  if (!$("hero-big")) return;
+  const stats = stemStats();
+  const included = stats.filter(x => !x.excluded);
+  const resultShown = !$("result").classList.contains("hide") && lastResult;
+  const stale = resultShown && ($("result").classList.contains("stale")
+    || !!((lastResult.style || {}).id && lastResult.style.id !== style)
+    || (mixedKey !== null && mixKey() !== mixedKey));
+  const name = styleName();
+  // a result is labelled with the style it was mixed with, not the one picked since
+  const mixedName = resultShown ? styleName((lastResult.style || {}).id || style) : name;
+  const groupProblem = typeof groupProblemText === "function" ? groupProblemText() : "";
+  const project = ($("project-name").value || "").trim();
+  const pending = stats.some(x => x.pending);
+  const lufsText = v => `${Number(v).toFixed(1).replace("-", "\u2212")} LUFS`;
+  $("hero-eyebrow").textContent = project || (resultShown ? L("你的混音", "Your mix")
+    : stats.length ? L("這次的分軌", "This session")
+    : L("丟分軌 → 選風格 → 拿混音（本機執行，不上傳雲端）", "Drop stems → pick a style → get a mix (runs on this machine; nothing is uploaded)"));
+  if (resultShown) {
+    $("hero-big").textContent = lufsText(lastResult.lufs);
+    const secs = Number.isFinite(lastSeconds) ? L(` · 用了 ${Math.round(lastSeconds)} 秒`, ` · mixed in ${Math.round(lastSeconds)} s`) : "";
+    $("hero-sub").textContent = stale
+      ? L(`上一次混音（${mixedName}）· 設定改過了，重新混音才會聽到`, `Last mix (${mixedName}) · settings changed since; mix again to hear them`)
+      : L(`${mixedName} · ${included.length} 軌${secs} · 沒有上傳任何音訊`, `${mixedName} · ${included.length} stems${secs} · nothing uploaded`);
+  } else if (stats.length) {
+    $("hero-big").textContent = L(`${stats.length} 軌`, `${stats.length} ${stats.length === 1 ? "stem" : "stems"}`);
+    const out = stats.length - included.length;
+    $("hero-sub").textContent = pending ? L("正在分析每一軌的角色與音量…", "Analysing each stem's role and level…")
+      : L(`風格 ${name}${out ? ` · 排除 ${out} 軌` : ""} · 還沒混音`, `${name}${out ? ` · ${out} excluded` : ""} · not mixed yet`);
+  } else {
+    $("hero-big").textContent = L("丟分軌進來", "Drop your stems");
+    $("hero-sub").textContent = L("WAV、AIFF、FLAC、MP3；所有分軌從同一個起點匯出。", "WAV, AIFF, FLAC or MP3 — export every stem from the same start point.");
+  }
+  // the bar: each family's share of the stems' summed loudness
+  const bar = $("mixbar"); bar.replaceChildren();
+  const total = stats.reduce((a, x) => a + x.power, 0);
+  if (!total) {
+    const e = document.createElement("div"); e.className = "empty"; bar.appendChild(e);
+  } else {
+    FAMILIES.forEach(([fam, label, color]) => {
+      [false, true].forEach(out => {
+        const p = stats.filter(x => x.family === fam && x.excluded === out).reduce((a, x) => a + x.power, 0);
+        if (!p) return;
+        const seg = document.createElement("button");
+        seg.type = "button"; seg.className = "seg" + (out ? " out" : "");
+        seg.style.flex = String(p / total); seg.style.background = color;
+        const pct = Math.round(100 * p / total);
+        seg.title = `${label()} ${pct}%${out ? L("（已排除）", " (excluded)") : ""}`;
+        seg.setAttribute("aria-label", seg.title);
+        seg.onclick = () => navTo("sec-stems");
+        bar.appendChild(seg);
+      });
+    });
+  }
+  const legend = $("legend"); legend.replaceChildren();
+  if (!pending) FAMILIES.forEach(([fam, label, color]) => {
+    const n = stats.filter(x => x.family === fam).length;
+    if (!n) return;
+    const sp = document.createElement("span");
+    const i = document.createElement("i"); i.style.background = color;
+    sp.append(i, document.createTextNode(`${label()} ${n}`));
+    legend.appendChild(sp);
+  });
+  if (pending && stats.length) {
+    const how = document.createElement("span"); how.className = "how";
+    how.textContent = L("分析完會顯示每一類分軌的音量佔比。", "The bar fills in once every stem is analysed.");
+    legend.appendChild(how);
+  } else if (total) {
+    const how = document.createElement("span"); how.className = "how";
+    how.textContent = L("色塊寬度＝各類分軌的音量佔比；斜線＝已排除、不進混音。點色塊看分軌。",
+      "Block width is each group's share of the stems' loudness; striped is excluded from the mix. Click a block to see the stems.");
+    legend.appendChild(how);
+  }
+  // the summary: what to do next
+  const box = $("summary"); box.replaceChildren();
+  const flagged = included.filter(x => x.issues.length);
+  let kind, mark, title, text, action, onAction;
+  if (!stats.length) {
+    kind = "idle"; mark = "↓"; title = L("先把分軌丟進來", "Start with your stems");
+    text = L("拖進來或點選檔案；可以一次選很多軌。", "Drag them in or choose files; select as many as you like.");
+    action = L("選擇檔案", "Choose files"); onAction = () => $("picker").click();
+  } else if (groupProblem) {
+    kind = "warn"; mark = "!";
+    title = L("群組設定還沒完成", "A group needs finishing");
+    text = groupProblem;
+    action = L("看分軌", "Review"); onAction = () => navTo("sec-stems");
+  } else if (stale) {
+    kind = "warn"; mark = "↻";
+    title = L("設定改過了", "Settings changed");
+    text = L(`目前聽到的是上一次（${mixedName}）的混音；重新混音才會套用新設定。`, `What you hear is the last mix (${mixedName}); mix again to apply the new settings.`);
+    action = L("開始混音", "Start mix"); onAction = () => $("go").click();
+  } else if (resultShown) {
+    kind = ""; mark = "✓";
+    title = L(`已用 ${mixedName} 混好`, `Mixed in ${mixedName}`);
+    const tp = Number(lastResult.true_peak_db).toFixed(1).replace("-", "\u2212");
+    text = L(`真峰值 ${tp} dBTP · 動態 ${Number(lastResult.crest_db).toFixed(1)} dB。用同響度和原始總和比一比，再下載。`,
+      `True peak ${tp} dBTP · dynamics ${Number(lastResult.crest_db).toFixed(1)} dB. Compare with the raw sum at matched loudness, then download.`);
+    action = L("聽結果", "Listen"); onAction = () => navTo("result");
+  } else if (pending) {
+    kind = "idle"; mark = "…";
+    title = L("正在分析分軌", "Analysing your stems");
+    text = L("每一軌的角色和音量讀好之後，這裡會告訴你下一步。", "Once every stem's role and level are read, this tells you what to do next.");
+    action = L("看分軌", "Review"); onAction = () => navTo("sec-stems");
+  } else if (flagged.length) {
+    kind = "warn"; mark = "!";
+    title = L(`有 ${flagged.length} 軌先看一下`, `${flagged.length} ${flagged.length === 1 ? "stem" : "stems"} to check first`);
+    text = flagged.slice(0, 3).map(x => `${x.name}: ${x.issues.join(", ")}`).join(" · ") + (flagged.length > 3 ? " …" : "");
+    action = L("看分軌", "Review"); onAction = () => navTo("sec-stems");
+  } else {
+    kind = ""; mark = "✓";
+    title = L(`${included.length} 軌都讀好了，可以混了`, `${included.length} ${included.length === 1 ? "stem is" : "stems are"} ready to mix`);
+    text = L(`風格：${name}。可以先換風格，或直接開始混音。`, `Style: ${name}. Pick another style, or start the mix.`);
+    action = L("開始混音", "Start mix"); onAction = () => $("go").click();
+  }
+  box.className = "summary" + (kind ? " " + kind : "");
+  const m = document.createElement("div"); m.className = "mark"; m.textContent = mark; m.setAttribute("aria-hidden", "true");
+  const t = document.createElement("div"); t.className = "txt";
+  const tt = document.createElement("div"); tt.className = "t"; tt.textContent = title;
+  const td = document.createElement("div"); td.className = "d"; td.textContent = text;
+  t.append(tt, td);
+  const btn = document.createElement("button"); btn.type = "button"; btn.textContent = action; btn.onclick = onAction;
+  if (onAction && action === L("開始混音", "Start mix")) btn.disabled = $("go").disabled || projectBusy;
+  box.append(m, t, btn);
+  // the action bar says what Start mix will do
+  const what = $("action-what");
+  what.replaceChildren();
+  if (stats.length) {
+    const b = document.createElement("b"); b.textContent = L(`${included.length} 軌`, `${included.length} ${included.length === 1 ? "stem" : "stems"}`);
+    const target = $("target").value;
+    what.append(b, document.createTextNode(` · ${name} · ` + (target ? `${target} LUFS` : L("風格預設響度", "style loudness"))));
+  } else {
+    what.textContent = L("還沒有分軌", "No stems yet");
+  }
+  renderNav(stats);
+}
+let overviewQueued = false;
+function queueOverview() {
+  if (overviewQueued) return;
+  overviewQueued = true;
+  requestAnimationFrame(() => { overviewQueued = false; renderOverview(); });
+}
+function initOverview() {
+  if (typeof MutationObserver === "undefined") return;
+  const watch = new MutationObserver(queueOverview);
+  ["files", "styles", "result", "go", "saved-projects", "refdrop"].forEach(id => {
+    const el = $(id);
+    if (el) watch.observe(el, {attributes: true, childList: true, subtree: true, characterData: true});
+  });
+  ["project-name", "target", "intensity", "sourceprofile", "balance", "blend", "reverb-amount", "groups-wrap"].forEach(id => {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener("input", queueOverview);
+    el.addEventListener("change", queueOverview);
+  });
+  if ($("groups-wrap")) watch.observe($("groups-wrap"), {attributes: true, childList: true, subtree: true, characterData: true});
+  if (typeof IntersectionObserver !== "undefined") {
+    const spy = new IntersectionObserver(entries => {
+      entries.forEach(e => {
+        if (!e.isIntersecting) return;
+        $("navlist").dataset.active = e.target.id;
+        $("navlist").querySelectorAll(".nav").forEach(b => {
+          const on = b.dataset.target === e.target.id;
+          b.classList.toggle("on", on);
+          if (on) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current");
+        });
+      });
+    }, {rootMargin: "-20% 0px -70% 0px"});
+    ["overview", "sec-stems", "sec-style", "sec-ref", "result", "sec-project"].forEach(id => $(id) && spy.observe($(id)));
+  }
+  renderOverview();
+}
+
 async function boot() {
+  initOverview();
   try {
     try {
       const r = await api("/api/roles");

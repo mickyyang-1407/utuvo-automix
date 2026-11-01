@@ -46,6 +46,7 @@ function harness(lang = 'en', {navigatorLang, stored, search = ''} = {}) {
     : path.endsWith('/open') ? response({id:'123456abcdef'}) : response({});
   const context = vm.createContext({console, setTimeout, clearTimeout, setInterval, clearInterval,
     performance, URL, Date, Map, Set, Promise, JSON, Number, Math,
+    requestAnimationFrame(){},  // the overview redraw is browser-only; this harness checks handlers
     document:{getElementById:get, createElement:element, createTextNode:t=>({textContent:String(t)}), querySelectorAll:()=>[], body:element()},
     window:{addEventListener(){}}, location,
     navigator:{language: navigatorLang || (lang === 'zh' ? 'zh-TW' : 'en-US')},
