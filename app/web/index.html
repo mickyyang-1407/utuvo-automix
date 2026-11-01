@@ -521,6 +521,16 @@ async function ensureSession() {
 }
 
 /* --------------------------------------------------------- local projects */
+// An error is always shown as text: messages can carry file names and
+// server text, which must never be read as markup.
+const esc = v => String(v).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c]);
+function statusError(message, tail = "") {
+  const span = document.createElement("span");
+  span.className = "err";
+  span.textContent = String(message);
+  $("status").replaceChildren(span, ...(tail ? [document.createTextNode(" " + tail)] : []));
+}
+
 function setProjectBusy(value) {
   projectBusy = value;
   $("workspace").inert = value;
@@ -693,7 +703,7 @@ async function uploadStems(fileList) {
     $("result").classList.add("hide");
     loadRoles();
   } catch (e) {
-    $("status").innerHTML = `<span class="err">${L("上傳失敗：", "Upload failed: ")}${e.message}</span>`;
+    statusError(L("上傳失敗：", "Upload failed: ") + e.message);
   } finally { importsInProgress--; }
   refreshGo();
 }
@@ -1416,7 +1426,7 @@ function renderFiles() {
         $("status").textContent = isMuted ? L("已納入，重新混音後生效", "Included. Mix again to apply.")
           : L("已排除，重新混音後生效", "Excluded. Mix again to apply.");
       } catch (e) {
-        $("status").innerHTML = `<span class="err">${e.message}</span>`;
+        statusError(e.message);
       }
     };
     d.appendChild(mute);
@@ -1520,7 +1530,7 @@ async function setRole(name, role) {
       if (pendingRoles[name] && pendingRoles[name].token === token) delete pendingRoles[name];
       roleInfo = mergeRoleInfo(confirmedRoles);
       renderFiles();
-      $("status").innerHTML = `<span class="err">${e.message}</span>`;
+      statusError(e.message);
     }
   }
 }
@@ -1539,7 +1549,7 @@ async function removeStem(name) {
     $("status").textContent = stems.length ? L(`${stems.length} 軌就緒`,
       `${stems.length} stem${stems.length === 1 ? "" : "s"} ready`) : "";
   } catch (e) {
-    $("status").innerHTML = `<span class="err">${e.message}</span>`;
+    statusError(e.message);
   }
   refreshGo();
 }
@@ -1636,7 +1646,7 @@ async function run() {
       // A cancel that failed in transport stays on screen next to the live
       // progress: the render may still be running, so the status line must
       // not pretend it stopped.
-      $("status").innerHTML = `<span class="err">${cancelError}</span> ${line}`;
+      statusError(cancelError, line);
     } else {
       $("status").textContent = line;
     }
@@ -1711,9 +1721,8 @@ async function run() {
     try { history.replaceState(null, "", "#s=" + sessionId); } catch (_) {}
   } catch (e) {
     const cancelled = /cancelled/i.test(e.message);
-    $("status").innerHTML = cancelled
-      ? L("已取消", "Cancelled")
-      : `<span class="err">${e.message}</span>`;
+    if (cancelled) $("status").textContent = L("已取消", "Cancelled");
+    else statusError(e.message);
   } finally {
     // This run is over: from here on a late cancel reply has nothing to say.
     runActive = false;
@@ -1845,7 +1854,7 @@ function show(r, secs) {
       (summary.common_gain_db != null ? L(`<p>共同匯出增益 ${fmt(summary.common_gain_db, 2)} dB · 成品比含殘響的分軌總和 ${gap == null ? "無法量測" : fmt(gap, 2) + " dB"}。分軌經 bus/master 前的差異詳見匯出報告。</p>`,
         `<p>Common export gain ${fmt(summary.common_gain_db, 2)} dB · mix minus the sum of stems (with reverb): ${gap == null ? "not measurable" : fmt(gap, 2) + " dB"}. See the export report for how the stems differ before bus/master.</p>`) : "") +
       r.exported.map(e =>
-        `<a class="sec" href="/api/session/${sessionId}/processed/file/${encodeURIComponent(e.name)}" download>${e.name}</a>`
+        `<a class="sec" href="/api/session/${sessionId}/processed/file/${encodeURIComponent(e.name)}" download>${esc(e.name)}</a>`
       ).join("");
     exp.classList.remove("hide");
   } else {
@@ -1857,7 +1866,7 @@ function show(r, secs) {
   if (r.verdicts && r.verdicts.length) {
     chk.innerHTML = r.verdicts.map(v => {
       const ok = v.verdict === "ok";
-      return `<span class="check ${ok ? "ok" : "warn"}">${v.check}<b>${v.measured}</b></span>`;
+      return `<span class="check ${ok ? "ok" : "warn"}">${esc(v.check)}<b>${esc(v.measured)}</b></span>`;
     }).join("");
   } else {
     chk.innerHTML = "";
@@ -1866,9 +1875,14 @@ function show(r, secs) {
   const secList = r.sections || [];
   const secBox = $("sections");
   if (secList.length > 1) {
-    secBox.innerHTML = `<span class="lab">${L("段落", "Sections")}</span>` + secList.map(s =>
-      `<span class="sec ${s.label}">${s.label} ${s.start_s.toFixed(0)}–${s.end_s.toFixed(0)}s</span>`
-    ).join("");
+    const lab = document.createElement("span");
+    lab.className = "lab"; lab.textContent = L("段落", "Sections");
+    secBox.replaceChildren(lab, ...secList.map(sec => {
+      const el = document.createElement("span");
+      el.className = "sec" + (/^[a-z_]+$/.test(String(sec.label)) ? " " + sec.label : "");
+      el.textContent = `${sec.label} ${Number(sec.start_s).toFixed(0)}–${Number(sec.end_s).toFixed(0)}s`;
+      return el;
+    }));
   } else {
     secBox.innerHTML = "";
   }
@@ -1954,23 +1968,23 @@ const w = $("warns");
       `Measured narrow-band change on stable passages: ${fmt(Math.min(...measured), 2)} to ${fmt(Math.max(...measured), 2)} dB; ${probes.length} passage${probes.length === 1 ? "" : "s"}, measured at the dynamic EQ stage, before compression`);
   };
   const rows = r.tracks.map(t => `<tr>
-      <td>${t.id}</td>
-      <td>${t.role}</td>
+      <td>${esc(t.id)}</td>
+      <td>${esc(t.role)}</td>
       <td class="num">${t.gain_db >= 0 ? "+" : ""}${fmt(t.gain_db, 2)}</td>
       <td class="pan">
-        <button data-pan="${t.id}" data-d="-0.1">◀</button>
+        <button data-pan="${esc(t.id)}" data-d="-0.1">◀</button>
         <span>${fmt(t.pan, 2)}</span>
-        <button data-pan="${t.id}" data-d="0.1">▶</button>
-        <button data-pan="${t.id}" data-pan-value="0" aria-label="${L("聲像歸零：", "Center pan: ")}${t.id}" title="${L("將此軌聲像偏移設為 0（取消額外的左右偏移；寬度與效果維持不變）", "Set this track's pan offset to 0 (removes the extra left/right offset; width and effects stay as they are)")}">0</button>
+        <button data-pan="${esc(t.id)}" data-d="0.1">▶</button>
+        <button data-pan="${esc(t.id)}" data-pan-value="0" aria-label="${L("聲像歸零：", "Center pan: ")}${esc(t.id)}" title="${L("將此軌聲像偏移設為 0（取消額外的左右偏移；寬度與效果維持不變）", "Set this track's pan offset to 0 (removes the extra left/right offset; width and effects stay as they are)")}">0</button>
       </td>
       <td class="num">${fmt(t.hpf_hz, 0)}</td>
       <td class="num">${fmt(t.send, 3)}</td>
       <td class="num">${t.ride_db ? `${fmt(t.ride_db[0], 1)}…${fmt(t.ride_db[1], 1)}` : "—"}</td>
       <td class="num" title="${unmaskTitle(t.dynamic_eq)}">${t.dynamic_eq ? L(`${fmt(t.dynamic_eq.duty_fraction * 100, 1)}% 時間<br>${fmt((t.dynamic_eq.center_hz || 3200) / 1000, 1)} kHz 中心最多 ${fmt(t.dynamic_eq.max_nominal_cut_db, 2)} dB`, `${fmt(t.dynamic_eq.duty_fraction * 100, 1)}% of the time<br>up to ${fmt(t.dynamic_eq.max_nominal_cut_db, 2)} dB around ${fmt((t.dynamic_eq.center_hz || 3200) / 1000, 1)} kHz`) : L("未讓位", "none")}</td>
       <td class="trim">
-        <button data-trim="${t.id}" data-d="-0.5">−</button>
+        <button data-trim="${esc(t.id)}" data-d="-0.5">−</button>
         <span>${t.trim_db ? (t.trim_db > 0 ? "+" : "") + fmt(t.trim_db, 1) : "0"}</span>
-        <button data-trim="${t.id}" data-d="0.5">+</button>
+        <button data-trim="${esc(t.id)}" data-d="0.5">+</button>
       </td>
     </tr>`).join("");
   $("tracks").innerHTML =
@@ -2264,7 +2278,7 @@ $("tracks").addEventListener("click", async (ev) => {
       invalidateComparison();
       $("status").textContent = L("已調整 pan，重新混音後生效", "Pan changed. Mix again to apply.");
     } catch (e) {
-      $("status").innerHTML = `<span class="err">${e.message}</span>`;
+      statusError(e.message);
     }
     return;
   }
@@ -2287,7 +2301,7 @@ $("tracks").addEventListener("click", async (ev) => {
     invalidateComparison();
     $("status").textContent = L("已調整，重新混音後生效", "Trim changed. Mix again to apply.");
   } catch (e) {
-    $("status").innerHTML = `<span class="err">${e.message}</span>`;
+    statusError(e.message);
   }
 });
 

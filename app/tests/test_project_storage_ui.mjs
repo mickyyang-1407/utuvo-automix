@@ -46,7 +46,7 @@ function harness(lang = 'en', {navigatorLang, stored, search = ''} = {}) {
     : path.endsWith('/open') ? response({id:'123456abcdef'}) : response({});
   const context = vm.createContext({console, setTimeout, clearTimeout, setInterval, clearInterval,
     performance, URL, Date, Map, Set, Promise, JSON, Number, Math,
-    document:{getElementById:get, createElement:element, querySelectorAll:()=>[], body:element()},
+    document:{getElementById:get, createElement:element, createTextNode:t=>({textContent:String(t)}), querySelectorAll:()=>[], body:element()},
     window:{addEventListener(){}}, location,
     navigator:{language: navigatorLang || (lang === 'zh' ? 'zh-TW' : 'en-US')},
     localStorage:{getItem(){ if (stored instanceof Error) throw stored; return stored ?? null; },
@@ -58,6 +58,7 @@ function harness(lang = 'en', {navigatorLang, stored, search = ''} = {}) {
     globalThis.test = {
       api, saveProject, openProject, refreshProjects, restore, runBody, lang: () => LANG,
       setLanguage, run, groupsSave(fn){saveGroups=fn;}, switching(){return languageSwitching;},
+      statusError,
       setup(){projectLoading=false; sessionId='111111111111'; stems=['kick.wav']; styleLibrary=[{id:'rock'}];
         style='rock'; saveGroups=async()=>true; showStyleIntent=()=>{};},
       imports(n){importsInProgress=n;}, pending(){return pendingEdits.size;},
@@ -231,6 +232,16 @@ for (const savedDraft of [draft,null]) {
   assert.deepEqual(h.navigation, []);
   assert.doesNotMatch(h.get('status').textContent, /Group settings|群組設定/);
   assert.match(h.get('status').textContent, lang === 'en' ? /Could not switch language/ : /無法切換語言/);
+  cases++;
+}
+// an error that carries a file name is shown as text, never as markup
+{
+  const h = harness(lang);
+  h.test.statusError('mix<img src=x onerror="alert(1)">.mp3: ffmpeg failed', '12s');
+  const status = h.get('status');
+  assert.equal(status.innerHTML, '');
+  assert.equal(status.children[0].textContent, 'mix<img src=x onerror="alert(1)">.mp3: ffmpeg failed');
+  assert.equal(status.children[0].className, 'err');
   cases++;
 }
 // a blank project name is saved under the name the user can read
