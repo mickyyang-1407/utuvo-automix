@@ -281,3 +281,21 @@ def test_a_real_ephemeral_socket_is_bound_published_and_closed(isolated, monkeyp
     assert _published_url(capsys) == f"http://{HOST}:{port}/"
     # serve() closed the socket again on the way out
     assert instances[0].socket.fileno() == -1
+
+
+def test_binding_never_waits_on_a_reverse_dns_lookup(monkeypatch):
+    """The standard server looks up a name for 127.0.0.1 while it binds; on a
+    Mac whose mDNS stalls that held the App on "Starting" for ~30 seconds."""
+    import socket
+
+    def no_lookup(*_args, **_kwargs):
+        raise AssertionError("server_bind must not resolve the bound address")
+
+    monkeypatch.setattr(socket, "getfqdn", no_lookup)
+    monkeypatch.setattr(socket, "gethostbyaddr", no_lookup)
+    httpd = srvmod.ThreadingHTTPServer((HOST, 0), srvmod.Handler)
+    try:
+        assert httpd.server_address[1] != 0
+        assert httpd.server_name == HOST
+    finally:
+        httpd.server_close()

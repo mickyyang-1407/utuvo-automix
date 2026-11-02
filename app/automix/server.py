@@ -41,12 +41,30 @@ import time
 import traceback
 import uuid
 import webbrowser
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import socketserver
+from http.server import BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer as _StdThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 import numpy as np
 
 from . import analyze, dsp, plan as planner, pipeline, reference as refmod, render, source_balance as balancemod
+
+class ThreadingHTTPServer(_StdThreadingHTTPServer):
+    """The standard threaded server without its reverse DNS lookup.
+
+    HTTPServer.server_bind asks socket.getfqdn() for the bound address, which
+    is a reverse lookup of 127.0.0.1.  On a Mac whose network makes mDNS wait
+    that lookup takes about 30 seconds, and the App sat on "Starting" for all
+    of it.  The name is only kept as server_name, which nothing here reads.
+    """
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = host
+        self.server_port = port
+
 
 def _resource_root() -> str:
     """Where the web assets and presets live.
@@ -88,6 +106,74 @@ _lock = threading.Lock()
 #: several GB on a three-minute song; two at once is how a laptop with 8 GB
 #: starts swapping instead of mixing.
 _render_slot = threading.Semaphore(1)
+
+#: Steps that replace files a session or a saved project depends on.  When the
+#: native window quits, the engine waits for these to finish before it ends
+#: (app.py), so a Quit never leaves a session half replaced.
+_guarded_steps = 0
+_guarded_cond = threading.Condition()
+_shutting_down = False
+
+
+class ShuttingDown(RuntimeError):
+    """The App is quitting; no new publication is started."""
+
+
+@contextlib.contextmanager
+def _guarded_step():
+    """A block that must not be cut off by a Quit (see begin_shutdown)."""
+    global _guarded_steps
+    with _guarded_cond:
+        if _shutting_down:
+            raise ShuttingDown("Automix is quitting")
+        _guarded_steps += 1
+    try:
+        yield
+    finally:
+        with _guarded_cond:
+            _guarded_steps -= 1
+            _guarded_cond.notify_all()
+
+
+def _guarded(func):
+    """Count a call as a step that must not be cut off by a Quit."""
+    def wrapper(*args, **kwargs):
+        with _guarded_step():
+            return func(*args, **kwargs)
+    wrapper.__name__ = func.__name__
+    wrapper.__doc__ = func.__doc__
+    wrapper.__wrapped__ = func
+    return wrapper
+
+
+def _atomic_write(path: str, data: bytes) -> None:
+    """Replace ``path`` with ``data`` in one rename from a scratch file next to it."""
+    scratch = f"{path}.{uuid.uuid4().hex[:8]}.part"
+    try:
+        with open(scratch, "wb") as fh:
+            fh.write(data)
+        os.replace(scratch, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(scratch)
+        raise
+
+
+def begin_shutdown(timeout: float) -> bool:
+    """Refuse new guarded steps and wait for the running ones to finish.
+
+    True when none is left; False when ``timeout`` ran out first.
+    """
+    global _shutting_down
+    deadline = time.monotonic() + timeout
+    with _guarded_cond:
+        _shutting_down = True
+        while _guarded_steps:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return False
+            _guarded_cond.wait(left)
+    return True
 
 
 #: sessions are disposable: after this long they are removed on the next start
@@ -553,8 +639,7 @@ class Session:
     def save(self) -> None:
         """Persist the editable state so reopening the app resumes the project."""
         try:
-            with open(os.path.join(self.dir, self.MANIFEST), "w", encoding="utf-8") as fh:
-                json.dump(self.manifest_data(), fh, ensure_ascii=False, indent=2)
+            self.write_manifest(os.path.join(self.dir, self.MANIFEST))
         except OSError:
             pass  # persistence is a convenience; never fail a request over it
 
@@ -562,10 +647,12 @@ class Session:
         """Write the manifest to ``path``; raises when it cannot be written.
 
         The publication path uses this one: a manifest that cannot be written
-        is a failed render, not a convenience.
+        is a failed render, not a convenience.  The file is replaced in one
+        rename, so a process that dies halfway leaves the previous manifest,
+        never half of a new one.
         """
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(self.manifest_data(**overrides), fh, ensure_ascii=False, indent=2)
+        text = json.dumps(self.manifest_data(**overrides), ensure_ascii=False, indent=2)
+        _atomic_write(path, text.encode("utf-8"))
 
     @classmethod
     def load(cls, root: str, sid: str) -> "Session | None":
@@ -795,6 +882,7 @@ def _publish_project_copy(stage: str, final: str) -> None:
         raise
 
 
+@_guarded
 def _save_project(sess: Session, root: str, name, controls) -> dict:
     """Called with the session lock held; publish a new, complete snapshot."""
     if not isinstance(name, str) or len(name) > 120:
@@ -849,6 +937,7 @@ def _list_projects(root: str) -> list[dict]:
     return sorted(projects, key=lambda item: item["saved_at"], reverse=True)
 
 
+@_guarded
 def _open_project(project_root: str, project_id: str, session_root: str) -> Session:
     _check_project_roots(project_root, session_root)
     source = os.path.join(project_root, _project_id(project_id))
@@ -1462,6 +1551,47 @@ def _remove_path(path: str) -> None:
         shutil.rmtree(path, ignore_errors=True)
 
 
+def _sweep_interrupted(root: str, min_age_s: float = RENDER_TIMEOUT_S + 120.0) -> int:
+    """Remove staging folders and partial uploads a quit render left behind.
+
+    Only what no running render can still own: anything younger than the
+    render timeout is left alone, in case a second copy of the server shares
+    this folder.  Backup folders are never touched -- after a failed rollback
+    they are the only copy of the files they hold.
+    """
+    removed = 0
+    now = time.time()
+    try:
+        sessions = os.listdir(root)
+    except OSError:
+        return 0
+    for sid in sessions:
+        sess_dir = os.path.join(root, sid)
+        if not os.path.isdir(sess_dir) or os.path.islink(sess_dir):
+            continue
+        stems = os.path.join(sess_dir, "stems")
+        try:
+            candidates = [
+                os.path.join(sess_dir, n) for n in os.listdir(sess_dir)
+                if n.startswith(STAGE_PREFIX)
+            ]
+            if os.path.isdir(stems) and not os.path.islink(stems):
+                candidates += [
+                    os.path.join(stems, n) for n in os.listdir(stems) if n.endswith(".part")
+                ]
+        except OSError:
+            continue
+        for path in candidates:
+            try:
+                if os.path.islink(path) or now - os.lstat(path).st_mtime < min_age_s:
+                    continue
+            except OSError:
+                continue
+            _remove_path(path)
+            removed += 1
+    return removed
+
+
 def _new_staging_dir(sess_dir: str) -> str:
     """A fresh staging folder inside the session, on the same filesystem."""
     path = os.path.join(sess_dir, STAGE_PREFIX + uuid.uuid4().hex[:12])
@@ -1688,6 +1818,7 @@ class _Publication:
         _remove_path(self.backup_dir)
 
 
+@_guarded
 def _publish_render(sess: "Session", stage_dir: str, result: dict,
                     controls: dict | None, prev_style: str | None,
                     reverb_amount: float, expect_reference: bool = False) -> None:
@@ -2280,13 +2411,13 @@ class Handler(BaseHTTPRequestHandler):
                             413,
                             f"session would exceed {MAX_SESSION_BYTES // (1024 ** 3)} GB of audio",
                         )
-                    with open(os.path.join(sess.stems_dir, name), "wb") as fh:
-                        fh.write(data)
-                    # a new stem invalidates the previous render
-                    sess.mix_path = None
-                    sess.plan = None
-                    sess.invalidate_result()
-                    sess.save()
+                    with _guarded_step():
+                        _atomic_write(os.path.join(sess.stems_dir, name), data)
+                        # a new stem invalidates the previous render
+                        sess.mix_path = None
+                        sess.plan = None
+                        sess.invalidate_result()
+                        sess.save()
                     return self._json(200, {"stems": sess.stem_names()})
 
                 if action == "reference":
@@ -2295,10 +2426,10 @@ class Handler(BaseHTTPRequestHandler):
                     if not data:
                         return self._error(400, "empty upload")
                     dst = os.path.join(sess.dir, "reference" + os.path.splitext(name)[1].lower())
-                    with open(dst, "wb") as fh:
-                        fh.write(data)
-                    sess.reference_path = dst
-                    sess.save()
+                    with _guarded_step():
+                        _atomic_write(dst, data)
+                        sess.reference_path = dst
+                        sess.save()
                     return self._json(200, {"ok": True})
 
                 if action == "cancel":
@@ -2758,6 +2889,10 @@ class Handler(BaseHTTPRequestHandler):
                     ),
                     expect_reference=bool(payload.get("reference_path")),
                 )
+            except ShuttingDown as exc:
+                # refused before anything moved: the staging folder is still ours
+                _remove_path(stage_dir)
+                return self._error(503, str(exc))
             except PublishError as exc:
                 return self._error(500, str(exc))
             # the answer is the result that was published, not whatever the
@@ -2806,6 +2941,9 @@ def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = False)
     pruned = _prune(root)
     if pruned:
         print(f"pruned {pruned} stale session(s)")
+    swept = _sweep_interrupted(root)
+    if swept:
+        print(f"removed {swept} leftover(s) of interrupted renders")
     restored = _load_sessions(root)
     if restored:
         print(f"restored {restored} session(s)")

@@ -166,12 +166,14 @@ def _r25_wav_sha(case: str) -> str:
 
 
 def _without_ratio_law(plan: dict) -> dict:
-    """R104 added ``ratio_law`` to every compressor; R25 plans predate it.  A
-    plan without the field still renders the R25 way, so it is set aside here."""
+    """R104 added ``ratio_law`` to every compressor and R109 a vocal balance
+    block to the vocal bus; R25 plans predate both.  A plan without them still
+    renders the R25 way, so they are set aside here."""
     plan = json.loads(json.dumps(plan))
     for block in plan.get("tracks", []) + list(plan.get("buses", {}).values()):
         if isinstance(block.get("comp"), dict):
             block["comp"].pop("ratio_law", None)
+    plan.get("buses", {}).get("vocal", {}).pop("balance", None)
     return plan
 
 

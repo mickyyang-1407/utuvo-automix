@@ -300,6 +300,8 @@
         "hats",
         "toms",
         "cymbals",
+        "overheads",
+        "room",
         "drums_full",
         "bass",
         "sub_808",
@@ -783,6 +785,47 @@
           "minimum": 0,
           "maximum": 2,
           "default": 1
+        },
+        "balance": {
+          "description": "Vocal bus only: after bus processing the renderer measures the vocal against everything else where the vocal sings (median of 3 s K-weighted windows) and moves the whole vocal bus to target_db, within the limits. Plans without it are rendered as before.",
+          "type": "object",
+          "required": [
+            "law",
+            "target_db"
+          ],
+          "properties": {
+            "law": {
+              "enum": [
+                "vocal_var_v1"
+              ]
+            },
+            "target_db": {
+              "type": "number",
+              "minimum": -12,
+              "maximum": 6
+            },
+            "max_boost_db": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 18,
+              "default": 9
+            },
+            "max_cut_db": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 18,
+              "default": 6
+            },
+            "style_db": {
+              "description": "What the style alone asks for: professional median plus the style's vocal_forward_db.",
+              "type": "number"
+            },
+            "source_db": {
+              "description": "The vocal against the rest in the stems as delivered; only recorded when their balance was vouched for.",
+              "type": "number"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": true

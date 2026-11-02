@@ -182,6 +182,48 @@ fi
 APP_ABS="$(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")"
 echo "built: $APP_ABS ($(du -sh "$APP" | cut -f1))"
 
+# 3. The native window.  What PyInstaller built becomes the engine, and a
+#    small Swift program -- the one macOS starts -- shows the engine's page in
+#    a window of its own (macos-shell/main.swift).  Any argument still reaches
+#    the engine unchanged, so the smoke test below goes through that path.
+SHELL_SRC="$SRC_ROOT/macos-shell/main.swift"
+if [[ ! -f "$SHELL_SRC" ]]; then
+  echo "missing $SHELL_SRC" >&2
+  exit 1
+fi
+if ! xcrun --find swiftc >/dev/null 2>&1; then
+  echo "the native window needs the Xcode command line tools (xcrun swiftc)" >&2
+  exit 1
+fi
+MACOS_DIR="$APP/Contents/MacOS"
+mv "$MACOS_DIR/Automix" "$MACOS_DIR/automix-engine"
+SHELL_PARTS=()
+for arch in $(lipo -archs "$MACOS_DIR/automix-engine"); do
+  part="$WORK_DIR/automix-shell-$arch"
+  xcrun swiftc -O -target "$arch-apple-macos13.0" -o "$part" "$SHELL_SRC" >> "$BUILD_LOG" 2>&1 || {
+    echo "the native window did not compile; see $BUILD_LOG" >&2
+    tail -20 "$BUILD_LOG" >&2
+    exit 1
+  }
+  SHELL_PARTS+=("$part")
+done
+lipo -create "${SHELL_PARTS[@]}" -output "$MACOS_DIR/Automix"
+rm -f "${SHELL_PARTS[@]}"
+# the page is served from 127.0.0.1 over plain http
+/usr/libexec/PlistBuddy \
+  -c "Add :NSAppTransportSecurity dict" \
+  -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" \
+  "$APP/Contents/Info.plist"
+# PyInstaller signed the engine as the main program, sealed to Info.plist;
+# it is a helper now, so it is signed on its own before the bundle is
+codesign --force --sign - "$MACOS_DIR/automix-engine" >> "$BUILD_LOG" 2>&1
+codesign --force --sign - "$APP" >> "$BUILD_LOG" 2>&1
+codesign --verify --deep --strict "$APP" >> "$BUILD_LOG" 2>&1 || {
+  echo "the assembled App does not verify; see $BUILD_LOG" >&2
+  exit 1
+}
+echo "native window: $MACOS_DIR/Automix (engine: $MACOS_DIR/automix-engine)"
+
 # 4. Smoke test: the bundle must be able to check a plan it was given.
 #    No server, no browser, no audio -- the App is asked to validate three
 #    plans and nothing else.  The fixtures live in a folder this script owns

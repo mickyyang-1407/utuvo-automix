@@ -27,6 +27,8 @@ ROLES = (
     "hats",
     "toms",
     "cymbals",
+    "overheads",
+    "room",
     "drums_full",
     "bass",
     "sub_808",
@@ -54,7 +56,12 @@ _KEYWORDS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("snare", "sd", "rim"), "snare"),
     (("hi hat", "hihat", "hat", "hh"), "hats"),
     (("tom",), "toms"),
-    (("cymbal", "ride", "crash", "oh", "overhead"), "cymbals"),
+    # overheads and room mics are drum-kit microphones, not instruments: an
+    # overhead pair is the whole kit from above, a room mic the kit in the
+    # room.  Short words, so they match as whole words only (_WHOLE_WORD).
+    (("overheads", "overhead", "over head", "ohs", "oh"), "overheads"),
+    (("rooms", "room", "rm"), "room"),
+    (("cymbal", "ride", "crash"), "cymbals"),
     (("drum", "drums", "drumbus", "kit"), "drums_full"),
     (("guitar ac", "acoustic guitar", "ac gtr", "acgtr", "acoustic", "gtr ac"), "guitar_acoustic"),
     (("guitar", "gtr", "electric guitar", "eg", "gtr el"), "guitar_electric"),
@@ -64,7 +71,9 @@ _KEYWORDS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("string", "violin", "cello", "viola"), "strings"),
     (("brass", "horn", "trumpet", "sax"), "brass"),
     (("bass", "bassline", "bs"), "bass"),
-    (("synth", "lead", "arp", "pluck"), "synth"),
+    # "lead" alone is not here: in a vocal session "Lead" is the lead vocal
+    # (see _LEAD_VOCAL_RE); a synth lead names its sound ("square lead")
+    (("synth", "square", "supersaw", "sawtooth", "saw lead", "lead saw", "sawlead", "leadsaw", "arp", "pluck"), "synth"),
     (("fx", "sfx", "riser", "impact", "noise"), "fx"),
 )
 
@@ -82,6 +91,10 @@ _KEYWORDS_ZH: tuple[tuple[tuple[str, ...], str], ...] = (
     (("踩鈸", "踩镲", "踩叉"), "hats"),
     (("吊镲", "吊鈸", "叮叮", "鈹", "镲"), "cymbals"),
     (("桶鼓", "嗵鼓"), "toms"),
+    # microphone words only: a bare "房間" or "頂部" also names a room piano
+    # or a top-line synth
+    (("頂部麥", "顶部麦", "頂麥", "顶麦"), "overheads"),
+    (("房間麥", "房间麦", "環境麥", "环境麦"), "room"),
     (("鼓組", "鼓组", "整套鼓", "鼓"), "drums_full"),
     (("電吉他", "电吉他"), "guitar_electric"),
     (("木吉他", "民謠吉他", "民谣吉他"), "guitar_acoustic"),
@@ -97,7 +110,10 @@ _KEYWORDS_ZH: tuple[tuple[tuple[str, ...], str], ...] = (
 )
 
 #: roles that belong to the drum group (they get the drum compression amount)
-DRUM_ROLES = frozenset({"kick", "snare", "hats", "toms", "cymbals", "drums_full"})
+DRUM_ROLES = frozenset({"kick", "snare", "hats", "toms", "cymbals", "overheads", "room", "drums_full"})
+#: roles whose keywords only count as whole words ("oh" is not in "john",
+#: "room" is not in "mushroom", "rm" is not in "harmony")
+_WHOLE_WORD = frozenset({"overheads", "room"})
 VOCAL_ROLES = frozenset({"lead_vocal", "backing_vocal"})
 
 #: The decoder policies a load (and a plan) may name.
@@ -477,6 +493,37 @@ _BASS_DI_ALIAS_RE = re.compile(r"(?<![a-z])bass[\s._/-]*di(?![a-z])")
 #: Topography NWE") or a competing label in front of it ("Noise Floor NWE") is
 #: not a tom name.  A recording number in front of the name is allowed,
 #: because the session numbers its takes.
+#: A track called just "Lead" (or "Ld", "LV", "Vx", with a number or a take
+#: name around it) is the lead vocal.  Real sessions name it that way, and
+#: "lead" used to sit in the synth row, so every such vocal was mixed as a
+#: synth: 6 dB down, synth HPF, no vocal bus.  Only reached when no instrument
+#: word in the name claimed it first ("Lead Gtr", "Lead Synth", "Square Lead").
+_LEAD_VOCAL_RE = re.compile(r"(?<![a-z])(?:lead|ld|lv|vx)(?![a-z])")
+
+#: Vocal words that are too short or too common to test as substrings ("bs"
+#: inside "libs" made "Ad Libs" a bass).  Whole words only, and a named
+#: instrument in the same name still wins ("Choir Pad", "Backing Keys").
+_VOCAL_WORDS: tuple[tuple[tuple[str, ...], str], ...] = (
+    # not "backing": a backing track is the band (test_mic_filename_roles)
+    (("adlib", "adlibs", "ad lib", "ad libs", "harm", "harms", "choir",
+      "ooh", "oohs", "aah", "aahs"), "backing_vocal"),
+    (("rap", "topline"), "lead_vocal"),
+)
+
+
+def _whole_word(word: str, key: str) -> bool:
+    """``word`` standing on its own in ``key`` (a plural "s" is allowed)."""
+    return re.search(rf"(?<![a-z0-9]){re.escape(word)}s?(?![a-z])", key) is not None
+
+
+def _names_an_instrument(key: str) -> bool:
+    """True when a non-vocal instrument word stands on its own in ``key``."""
+    return any(
+        role not in VOCAL_ROLES and any(_whole_word(w, key) for w in words)
+        for words, role in _KEYWORDS
+    )
+
+
 _NWE_TOM_RE = re.compile(
     r"^(?:\d+\.? )?(?:t[123] (?:top|bottom|btm)|floor) nwe(?: \d+)?$"
 )
@@ -525,8 +572,13 @@ def _keyword_role(name: str) -> str | None:
             if w in key:
                 return role
     whole = key
+    # a microphone position ("Sn Top", "SubKick", "BassDI") is an instrument too
+    if _alias_role(key)[0] is None:
+        for words, role in _VOCAL_WORDS:
+            if any(_whole_word(w, key) for w in words) and not _names_an_instrument(key):
+                return role
     alias, key = _alias_role(key)
-    for words, role in _KEYWORDS:
+    for index, (words, role) in enumerate(_KEYWORDS):
         # A named bass guitar is a bass even when it is acoustic.  Check the
         # compound at the guitar priority, after explicit vocal/drum/808 labels;
         # a bass-like substring inside another word is not an instrument name.
@@ -537,7 +589,17 @@ def _keyword_role(name: str) -> str | None:
         if role == "guitar_acoustic" and re.search(r"(?<![a-z])ukulele(?![a-z])", key):
             return role
         for w in words:
-            if w in key:
+            if role in _WHOLE_WORD:
+                if re.search(rf"(?<![a-z0-9]){re.escape(w)}(?![a-z])", key):
+                    # "piano room" is a piano recorded in a room, not a drum
+                    # room mic: a named instrument further down the table wins
+                    if any(
+                        later_role not in DRUM_ROLES and any(lw in key for lw in later_words)
+                        for later_words, later_role in _KEYWORDS[index + 1:]
+                    ):
+                        break
+                    return role
+            elif w in key:
                 return role
     # A named position beats no name at all: "T1 Top NWE" is a tom even though
     # no keyword in it says so.  By now every explicit label in the name
@@ -545,6 +607,8 @@ def _keyword_role(name: str) -> str | None:
     # whole-basename test keeps the position from swallowing anything else.
     if _NWE_TOM_RE.match(whole):
         return "toms"
+    if alias is None and _LEAD_VOCAL_RE.search(key):
+        return "lead_vocal"
     return alias
 
 
@@ -1178,7 +1242,7 @@ def refine_roles(stems: "list[Stem]", preview_s: float = 30.0) -> None:
             promote(name, "sub_808" if f["low_hz"] < 50.0 else "bass")
 
     # nobody is the top end: the brightest percussive unknown track is the hats
-    if not have & {"hats", "cymbals"}:
+    if not have & {"hats", "cymbals", "overheads"}:
         name, f = max(feats.items(), key=lambda kv: kv[1]["high"])
         if f["high"] > 0.35 and f["crest"] > 8.0:
             promote(name, "hats")

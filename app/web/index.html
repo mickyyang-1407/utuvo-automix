@@ -2692,7 +2692,7 @@ const FAMILIES = [
   ["music", () => L("樂器", "Instruments"), "var(--music)"],
   ["fx", () => L("效果與其他", "FX & other"), "var(--fx)"],
 ];
-const ROLE_FAMILY = {kick: "drums", snare: "drums", hats: "drums", toms: "drums", cymbals: "drums",
+const ROLE_FAMILY = {kick: "drums", snare: "drums", hats: "drums", toms: "drums", cymbals: "drums", overheads: "drums", room: "drums",
   drums_full: "drums", bass: "bass", sub_808: "bass", lead_vocal: "vocals", backing_vocal: "vocals",
   fx: "fx", other: "fx"};
 const familyOf = role => ROLE_FAMILY[role] || (role ? "music" : "fx");

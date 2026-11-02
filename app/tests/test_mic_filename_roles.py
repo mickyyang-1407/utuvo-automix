@@ -349,8 +349,9 @@ def test_mic_filename_ordinary_names_keep_their_old_roles():
         "kick.wav": "kick",
         "snare.wav": "snare",
         "tom.wav": "toms",
-        "overhead.wav": "cymbals",
-        "19. OH Left.wav": "cymbals",
+        # R109: overheads became a role of their own (requested: "鼓組要有OH和Room")
+        "overhead.wav": "overheads",
+        "19. OH Left.wav": "overheads",
         "2. D6 KickPort.wav": "kick",
         "bass.wav": "bass",
         "guitar ac.wav": "guitar_acoustic",

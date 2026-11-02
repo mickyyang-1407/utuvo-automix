@@ -63,17 +63,26 @@ SR = 48000
 #: LUFS -10.63 -> -10.57, crest 11.48 -> 11.54, width .105 -> .106,
 #: correlation .981 -> .980.  Intended.  Saved plans without ratio_law still
 #: render exactly as before.
+#: 2026-11-02 (R109): the vocal bus is moved to where a professional mix puts
+#: the vocal against the rest (median of 11 MUSDB18 mixes measured with the
+#: renderer's own meter, -2.7 dB, plus the style's vocal_forward_db: -1.2 dB
+#: for pop_2020s), measured after bus compression on the dry buses.  The
+#: synthetic demo vocal sat at +1.81 dB, so it comes down 3.01 dB: low
+#: .2645 -> .3412, mid .211 -> .1486, low_mid .4557 -> .4373, LUFS -10.57 ->
+#: -10.66, crest 11.54 -> 11.41, width .106 -> .122, correlation .980 ->
+#: .974.  Intended.  Saved plans without the vocal balance block render
+#: exactly as before.
 EXPECTED = {
-    "lufs": -10.57,
-    "crest_db": 11.54,
-    "width": 0.106,
-    "correlation": 0.98,
+    "lufs": -10.66,
+    "crest_db": 11.41,
+    "width": 0.122,
+    "correlation": 0.974,
     "band_energy": {
-        "low": 0.2645,
-        "low_mid": 0.4557,
-        "mid": 0.211,
-        "presence": 0.0283,
-        "air": 0.0233,
+        "low": 0.3412,
+        "low_mid": 0.4373,
+        "mid": 0.1486,
+        "presence": 0.0219,
+        "air": 0.0294,
     },
 }
 

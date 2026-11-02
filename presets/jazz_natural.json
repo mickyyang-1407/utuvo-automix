@@ -41,6 +41,8 @@
     "hats": -7,
     "toms": -3.5,
     "cymbals": -7,
+    "overheads": -7,
+    "room": -8.0,
     "drums_full": -2.5,
     "bass": -2.5,
     "sub_808": -3,

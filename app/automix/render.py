@@ -294,6 +294,51 @@ def _apply_comp(x: np.ndarray, sr: int, spec: dict | None) -> np.ndarray:
     )
 
 
+def _vocal_balance(buses: dict, spec: dict, sr: int, warnings: list) -> dict | None:
+    """Move the whole vocal bus so the vocal sits at the plan's target.
+
+    Measured on the processed buses, after every compressor and before the
+    master stage: the dry vocal bus against the sum of the other dry buses, only where the vocal sings
+    (dsp.vocal_to_rest_db).  The gain is clamped to the plan's limits and a
+    clamp is reported, never hidden.
+    """
+    bal = spec.get("balance")
+    vocal = buses.get("vocal")
+    if not bal or vocal is None or not vocal.any():
+        return None
+    if bal.get("law") != "vocal_var_v1":
+        raise RenderError(f"unknown vocal balance law {bal.get('law')!r}")
+    # dry against dry: the fx bus carries every track's reverb return,
+    # the vocal's own included, so it belongs to neither side
+    rest = None
+    for name, sig in buses.items():
+        if name in ("vocal", "fx"):
+            continue
+        rest = sig.copy() if rest is None else rest + sig
+    if rest is None or not rest.any():
+        return None
+    measured, windows = dsp.vocal_to_rest_db(vocal, rest, sr)
+    del rest
+    if measured is None:
+        return None
+    target = float(bal["target_db"])
+    wanted = target - measured
+    applied = max(-float(bal.get("max_cut_db", 6.0)), min(float(bal.get("max_boost_db", 9.0)), wanted))
+    if abs(applied - wanted) > 0.01:
+        warnings.append(
+            f"vocal balance: wanted {wanted:+.1f} dB to reach {target:+.1f} dB against the rest, "
+            f"limited to {applied:+.1f} dB"
+        )
+    buses["vocal"] = vocal * dsp.db_to_lin(applied)
+    return {
+        "law": "vocal_var_v1",
+        "measured_db": round(measured, 2),
+        "target_db": round(target, 2),
+        "applied_db": round(applied, 2),
+        "windows": windows,
+    }
+
+
 def render(
     stems: list,
     plan: dict,
@@ -583,6 +628,9 @@ def render(
         buses[name] = sig
         del sig
 
+    # ---- vocal balance (plans that ask for it; older plans render as before)
+    vocal_balance = _vocal_balance(buses, bus_specs.get("vocal") or {}, sr, render_warnings)
+
     # The fx bus is part of the original mix path (dry FX plus wet return).
     # Its level must not be described as the pure reverb level.
     mix = np.zeros((n, 2))
@@ -685,6 +733,8 @@ def render(
         "staging_db": round(staging_db, 2),
         "master_gain_db": round(master_gain_db, 2),
     }
+    if vocal_balance is not None:
+        report["vocal_balance"] = vocal_balance
     decision = (plan.get("style") or {}).get("source_balance")
     if decision is not None:
         report["source_balance"] = json.loads(json.dumps(decision))
@@ -913,6 +963,16 @@ def write_report(path: str, plan: dict, report: dict, stems: list) -> None:
         f"| width | {report['width']} |",
         f"| loudness passes | {report['loudness_passes']} |",
         f"| master gain | {report.get('master_gain_db', 0.0):+.2f} dB |",
+        *(
+            [
+                "| vocal against the rest (where it sings, before the master stage) | "
+                f"{vb['measured_db'] + vb['applied_db']:+.1f} dB "
+                f"(target {vb['target_db']:+.1f}; measured {vb['measured_db']:+.1f}, "
+                f"vocal bus moved {vb['applied_db']:+.1f} dB) |"
+            ]
+            if (vb := report.get("vocal_balance"))
+            else []
+        ),
         "",
         "## Tracks",
         "",

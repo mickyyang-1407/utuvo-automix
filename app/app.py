@@ -16,7 +16,10 @@ and ``--cli ...`` hands the rest of the arguments to the real command line.
 
 import multiprocessing
 import os
+import signal
 import sys
+import threading
+import time
 
 # Before any argument is looked at and before anything can spawn: a frozen
 # child re-executes this file, and freeze_support is what tells it to behave
@@ -89,12 +92,61 @@ def main(argv: list[str] | None = None) -> int:
     if "--multiprocessing-fork" in argv:
         return 0
     if not argv:
+        _attach_to_shell()
         serve(open_browser=os.environ.get("AUTOMIX_NO_BROWSER") != "1")
         return 0
     if len(argv) == 2 and argv[0] == "--validate-plan":
         return _validate_plan(argv[1])
     _say(f"unknown argument: {' '.join(argv)}\n{USAGE}", error=True)
     return 2
+
+
+def _attach_to_shell() -> None:
+    """Belong to the native window that started this engine, if one did.
+
+    The window (macos-shell/main.swift) sets AUTOMIX_SHELL_PID, reads the
+    address the server prints, and starts us as the leader of our own process
+    group.  Two things follow from that:
+
+    * stdout must be line-buffered: a windowed bundle can have no sys.stdout
+      at all, and a pipe is block-buffered, so the address would never arrive.
+    * when the window goes away -- quit, crash or Force Quit -- the server and
+      every render child it started must go too.  Quit sends SIGTERM; a crash
+      or Force Quit is noticed by polling the parent.  Either way a running
+      publication is allowed to finish, then the whole group is ended.
+
+    Without AUTOMIX_SHELL_PID nothing changes.
+    """
+    shell = os.environ.get("AUTOMIX_SHELL_PID", "")
+    if not shell.isdigit():
+        return
+    shell_pid = int(shell)
+    try:
+        sys.stdout = os.fdopen(os.dup(1), "w", encoding="utf-8", errors="replace", buffering=1)
+    except OSError:
+        pass
+
+    def end() -> None:
+        # a publication or a project copy that is running finishes first
+        # (automix.server.begin_shutdown); render children are just stopped
+        from automix import server as srvmod
+        try:
+            srvmod.begin_shutdown(timeout=60.0)
+        finally:
+            try:
+                if os.getpgrp() == os.getpid():
+                    os.killpg(os.getpgrp(), signal.SIGKILL)
+            finally:
+                os._exit(0)
+
+    def watch() -> None:
+        while os.getppid() == shell_pid:
+            time.sleep(1.0)
+        end()
+
+    # Quit in the window sends SIGTERM to this process only
+    signal.signal(signal.SIGTERM, lambda _signum, _frame: end())
+    threading.Thread(target=watch, name="shell-watch", daemon=True).start()
 
 
 class _DiscardStream:

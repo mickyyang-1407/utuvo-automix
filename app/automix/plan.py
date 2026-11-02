@@ -30,6 +30,21 @@ MAX_MASK_CARVES = unmask.MAX_TARGETS  # compatibility name for the one cap owner
 #: something is wrong with the source and the receipt should say so.
 MAX_STAGE_DB = 18.0
 
+#: Where the vocal sits against everything else in a finished mix, measured
+#: only where it sings and with the renderer's own meter
+#: (dsp.vocal_to_rest_db): the median of 11 professional MUSDB18 mixes is
+#: -2.7 dB (range -8.2..+0.2).  A style's
+#: vocal_forward_db is added on top.  The renderer measures the real buses
+#: after compression and moves the whole vocal bus (lead and backing) to this
+#: target: compressing a sustained vocal twice with half make-up cost it
+#: 3.5-4.5 dB, and a raw session with many accompaniment tracks buries a
+#: single vocal track however its own gain is set.
+VOCAL_VAR_PRO_MEDIAN_DB = -2.7
+VOCAL_BALANCE_LAW = "vocal_var_v1"
+#: the correction is a balance fix, not a rescue: beyond this it is reported
+VOCAL_BALANCE_MAX_BOOST_DB = 9.0
+VOCAL_BALANCE_MAX_CUT_DB = 6.0
+
 #: sources worth riding: sustained material whose level should stay put across
 #: sections.  Drums are deliberately excluded -- their dynamics *are* the part.
 RIDE_ROLES = frozenset(
@@ -92,6 +107,8 @@ ROLE_GROUP = {
     "hats": "drum",
     "toms": "drum",
     "cymbals": "drum",
+    "overheads": "drum",
+    "room": "drum",
     "drums_full": "drum",
     "bass": "bass",
     "sub_808": "bass",
@@ -116,6 +133,9 @@ HPF_HZ = {
     "hats": 320.0,
     "toms": 60.0,
     "cymbals": 400.0,
+    # the whole kit from above: keep the shells, lose the rumble
+    "overheads": 140.0,
+    "room": 60.0,
     "drums_full": 30.0,
     "bass": 28.0,
     "sub_808": 24.0,
@@ -143,6 +163,9 @@ REVERB_WEIGHT = {
     "kick": 0.0,
     "hats": 0.10,
     "cymbals": 0.15,
+    "overheads": 0.08,
+    # a room mic already is the room
+    "room": 0.0,
     "bass": 0.0,
     "sub_808": 0.0,
     "guitar_electric": 0.55,
@@ -167,6 +190,9 @@ PAN = {
     "hats": 0.22,
     "toms": -0.18,
     "cymbals": 0.30,
+    # a stereo pair keeps its own image; a mono L/R pair is a capture group
+    "overheads": 0.0,
+    "room": 0.0,
     "drums_full": 0.0,
     "guitar_electric": -0.30,
     "guitar_acoustic": 0.25,
@@ -293,6 +319,36 @@ def _comp_params(group: str, amount: float) -> dict:
         # this rule gets the same result.
         "makeup": {"mode": "half_average_reduction", "cap_db": 12.0},
     }
+
+
+def _source_vocal_balance(stems: list[Stem], fitted: dict | None = None) -> float | None:
+    """The vocal's level against everything else in the stems as delivered.
+
+    ``fitted`` (track id -> dB) is an accepted same-song reference fit: that
+    fit is the balance somebody vouched for, so it is applied here too --
+    measuring the raw stems would undo it.
+    """
+    fitted = fitted or {}
+    n = max((s.audio.shape[0] for s in stems), default=0)
+    if n == 0:
+        return None
+    vocal = np.zeros((n, 2))
+    rest = np.zeros((n, 2))
+    for s in stems:
+        a = s.audio
+        if a.ndim == 1:
+            a = np.stack([a, a], axis=1)
+        g = dsp.db_to_lin(float(fitted.get(analyze.track_id(s.name), 0.0)))
+        if s.role in VOCAL_ROLES:
+            vocal[: a.shape[0]] += a * g
+        elif ROLE_GROUP.get(s.role) != "fx":
+            # the renderer compares dry buses and leaves the fx bus out of
+            # both sides; the source is measured the same way
+            rest[: a.shape[0]] += a * g
+    if not vocal.any() or not rest.any():
+        return None
+    value, _windows = dsp.vocal_to_rest_db(vocal, rest, int(stems[0].sr))
+    return value
 
 
 def _gain_stage(
@@ -1494,6 +1550,29 @@ def build_plan(
         return bus
 
     buses = {g: _bus(g) for g in ("drum", "bass", "music", "vocal", "fx")}
+    if any(t["role"] in VOCAL_ROLES for t in tracks):
+        style_db = (VOCAL_VAR_PRO_MEDIAN_DB
+                    + float(preset.get("vocal_forward_db", 0.0)) * float(intensity))
+        balance = {
+            "law": VOCAL_BALANCE_LAW,
+            "target_db": round(style_db, 2),
+            "max_boost_db": VOCAL_BALANCE_MAX_BOOST_DB,
+            "max_cut_db": VOCAL_BALANCE_MAX_CUT_DB,
+            "style_db": round(style_db, 2),
+        }
+        # The source's own vocal balance only counts when somebody vouched
+        # for it (proven stems, a declared profile, an explicit amount).  An
+        # unproven session is raw recording levels, and keeping half of a
+        # quietly recorded vocal is how every vocal came out too quiet.
+        k_vocal = 0.0 if decision["origin"] == "default" else float(balance_preserve)
+        if k_vocal > 0.0:
+            source_db = _source_vocal_balance(stems, fitted)
+            if source_db is not None:
+                balance["source_db"] = round(source_db, 2)
+                balance["target_db"] = round(
+                    min(6.0, max(-12.0, k_vocal * source_db + (1.0 - k_vocal) * style_db)), 2
+                )
+        buses["vocal"]["balance"] = balance
     # the preset's tonal tilt is a *master* curve: it describes the finished
     # mix's balance, so it is written into the master EQ rather than spread
     # across the tracks (which would apply it several times over).
@@ -2025,6 +2104,11 @@ def _engine_invariants(plan: dict) -> None:
     for key in ("schema_version", "source", "style", "tracks", "buses"):
         if key not in plan:
             raise PlanError(f"plan missing required key {key!r}")
+    for name, bus in (plan["buses"] or {}).items():
+        # only the renderer's vocal step reads it; anywhere else it would be
+        # a setting that silently does nothing
+        if name != "vocal" and isinstance(bus, dict) and "balance" in bus:
+            raise PlanError(f"buses.{name}.balance: only the vocal bus has a balance target")
     if not plan["tracks"]:
         raise PlanError("plan has no tracks")
     # The schema says which decoder policies exist; this says it again, so a

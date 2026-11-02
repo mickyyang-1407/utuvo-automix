@@ -724,6 +724,56 @@ def true_peak_db(x: np.ndarray, sr: int, oversample: int = 4, block_s: float = 8
     return lin_to_db(peak)
 
 
+def windowed_lufs(x: np.ndarray, sr: int, win_s: float = 3.0, hop_s: float = 1.0) -> np.ndarray:
+    """K-weighted loudness of each window (BS.1770 weighting, no gating), in LUFS.
+
+    3 s windows are the "short-term" loudness of EBU R128.  Silence reads
+    -inf as -120, so callers can threshold without special cases.
+    """
+    if x.ndim == 1:
+        x = x[:, None]
+    if x.shape[0] == 0:
+        return np.array([-120.0])
+    # the K-weighting coefficients are the 48 kHz ones (as in loudness_lufs)
+    if sr != 48000:
+        x = resample_fft(x, sr, 48000)
+        sr = 48000
+    n = x.shape[0]
+    win = max(1, int(win_s * sr))
+    hop = max(1, int(hop_s * sr))
+    k = _k_weight(x.astype(np.float64, copy=False), sr)
+    power = np.sum(k * k, axis=1)
+    del k
+    cs = np.zeros(n + 1)
+    np.cumsum(power, out=cs[1:])
+    if n < win:
+        means = np.array([cs[n] / n])
+    else:
+        starts = np.arange(0, n - win + 1, hop)
+        means = (cs[starts + win] - cs[starts]) / win
+    return -0.691 + 10.0 * np.log10(np.maximum(means, 1e-12))
+
+
+def vocal_to_rest_db(
+    vocal: np.ndarray, rest: np.ndarray, sr: int, active_db: float = 15.0
+) -> tuple[float | None, int]:
+    """How loud ``vocal`` sits against ``rest`` where the vocal is singing.
+
+    Both are cut into 3 s windows; windows where the vocal is within
+    ``active_db`` of its own loudest window (and the rest is not silent) are
+    kept, and the median of vocal minus rest over them is returned with the
+    number of windows used.  A long intro or solo without singing therefore
+    does not make the vocal look quiet.  (None, 0) when the vocal never sings.
+    """
+    n = min(len(vocal), len(rest))
+    lv = windowed_lufs(vocal[:n], sr)
+    lr = windowed_lufs(rest[:n], sr)
+    active = (lv > float(np.max(lv)) - active_db) & (lv > -50.0) & (lr > -60.0)
+    if not active.any():
+        return None, 0
+    return float(np.median(lv[active] - lr[active])), int(active.sum())
+
+
 def short_term_db(
     x: np.ndarray, sr: int, win_s: float = 0.4, hop_s: float = 0.1
 ) -> tuple[np.ndarray, np.ndarray]:
