@@ -71,5 +71,14 @@
     "caveat": "仍會使用既有逐軌處理與master鏈；不等於原樣直通或現場收音重建。",
     "numeric_basis": "UTUVO自己調出來的起點數值，不是音質保證。",
     "source_refs": []
+  },
+  "techniques": {
+    "kick_duck_db": 0.0,
+    "drum_parallel": 0.0,
+    "vocal_delay": {
+      "send": 0.0,
+      "division": "slap",
+      "feedback": 0.0
+    }
   }
 }

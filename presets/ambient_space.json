@@ -71,5 +71,14 @@
     "caveat": "只有既有共享convolution return與寬度處理；沒有shimmer、granular或自適應空間。",
     "numeric_basis": "UTUVO自己調出來的起點數值，不是音質保證。",
     "source_refs": []
+  },
+  "techniques": {
+    "kick_duck_db": 0.0,
+    "drum_parallel": 0.0,
+    "vocal_delay": {
+      "send": 0.18,
+      "division": "1/4",
+      "feedback": 0.45
+    }
   }
 }

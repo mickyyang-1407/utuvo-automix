@@ -71,5 +71,14 @@
     "caveat": "不模擬amp或鼓取代；低crest來源會觸發既有壓縮保護，仍需檢查master動態。",
     "numeric_basis": "UTUVO自己調出來的起點數值，不是音質保證。",
     "source_refs": []
+  },
+  "techniques": {
+    "kick_duck_db": 2.0,
+    "drum_parallel": 0.5,
+    "vocal_delay": {
+      "send": 0.06,
+      "division": "slap",
+      "feedback": 0.1
+    }
   }
 }

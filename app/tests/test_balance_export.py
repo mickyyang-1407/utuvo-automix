@@ -281,9 +281,11 @@ def test_reused_collection_removes_stems_excluded_from_the_new_plan(sources,tmp_
     assert set(collected['stems'])=={'vocal','drums'}
     p['tracks']=[t for t in p['tracks'] if t['id']=='vocal']
     p['tracks'][0]['sends']['plate']=0
+    p['tracks'][0]['sends'].pop('delay',None)
     mix,report=render.render(sources,p,collect=collected)
     assert set(collected['stems'])=={'vocal'}
     assert 'reverb' not in collected
+    assert 'delay' not in collected  # R111: the delay return is reset like the reverb's
     assert collected['unrelated_metadata']=={'keep':True}
     render.write_stem_export(str(tmp_path),p,collected,report,mix)
     assert [f['source_id'] for f in report['export_summary']['files']]==['vocal']

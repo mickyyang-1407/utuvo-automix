@@ -68,8 +68,17 @@
   },
   "intent": {
     "applicability": "適合低頻與鼓組主導的電子舞曲分組。",
-    "caveat": "沒有tempo跟隨kick pump、節拍delay或自動編排；請勿把名稱當成這些功能。",
+    "caveat": "bass會在大鼓打下去時讓開（依大鼓本身，不是固定節拍的pump），人聲delay跟著偵測到的速度走（不清楚時改用短回音）；沒有自動編排。",
     "numeric_basis": "UTUVO自己調出來的起點數值，不是音質保證。",
     "source_refs": []
+  },
+  "techniques": {
+    "kick_duck_db": 4.0,
+    "drum_parallel": 0.25,
+    "vocal_delay": {
+      "send": 0.1,
+      "division": "1/8d",
+      "feedback": 0.3
+    }
   }
 }

@@ -14,7 +14,7 @@
   "funk_disco": {
     "description": "Drums and bass up front, tight rhythm.",
     "applicability": "For rhythmic arrangements where drums, bass and harmony instruments answer each other.",
-    "caveat": "No beat tracking or automatic groove correction; the balance between parts still depends on the source and the keep amount.",
+    "caveat": "The vocal delay follows the detected tempo (a short slapback when the tempo is unclear), but there is no automatic groove correction; the balance between parts still depends on the source and the keep amount.",
     "numeric_basis": "Starting values tuned by UTUVO; not a guarantee of sound quality."
   },
   "heavy_rock_metal": {
@@ -26,7 +26,7 @@
   "house_dance": {
     "description": "Focused low end, brighter and wider.",
     "applicability": "For electronic dance stems driven by the low end and the drums.",
-    "caveat": "No tempo-synced kick pumping, beat-synced delay or automatic arrangement; do not read the name as promising these.",
+    "caveat": "The bass ducks under the kick (driven by the kick itself, not a fixed-rate pump) and the vocal delay follows the detected tempo (a short slapback when it is unclear); there is no automatic arrangement.",
     "numeric_basis": "Starting values tuned by UTUVO; not a guarantee of sound quality."
   },
   "indie_pop": {
@@ -50,7 +50,7 @@
   "reggae_groove": {
     "description": "Thick low end, darker space.",
     "applicability": "A starting point for arrangements built on the bass-and-rhythm relationship.",
-    "caveat": "Not a dub effects rack: no tempo echo, delay throws or rhythmic feedback.",
+    "caveat": "Not a dub effects rack: one vocal delay that follows the detected tempo (dotted eighth; a short slapback when the tempo is unclear), no delay throws or live moves.",
     "numeric_basis": "Starting values tuned by UTUVO; not a guarantee of sound quality."
   },
   "rnb_soul": {

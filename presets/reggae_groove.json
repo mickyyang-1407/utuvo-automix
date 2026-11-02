@@ -68,8 +68,17 @@
   },
   "intent": {
     "applicability": "適合貝斯與節奏關係突出的編曲起點。",
-    "caveat": "不是Dub效果器：沒有tempo echo、delay throw或節奏式回授。",
+    "caveat": "不是Dub效果器：只有一條跟著偵測速度走的人聲delay（附點八分、速度不清楚時改用短回音），沒有delay throw或即時操作。",
     "numeric_basis": "UTUVO自己調出來的起點數值，不是音質保證。",
     "source_refs": []
+  },
+  "techniques": {
+    "kick_duck_db": 1.5,
+    "drum_parallel": 0.3,
+    "vocal_delay": {
+      "send": 0.16,
+      "division": "1/8d",
+      "feedback": 0.4
+    }
   }
 }

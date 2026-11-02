@@ -65,5 +65,14 @@
     "min_crest_db": 7.0,
     "max_width": 1.4,
     "max_saturation": 0.5
+  },
+  "techniques": {
+    "kick_duck_db": 2.0,
+    "drum_parallel": 0.35,
+    "vocal_delay": {
+      "send": 0.1,
+      "division": "1/4",
+      "feedback": 0.25
+    }
   }
 }

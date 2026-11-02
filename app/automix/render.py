@@ -25,7 +25,7 @@ import wave
 import numpy as np
 
 from . import analyze, dsp, unmask
-from .plan import ROLE_GROUP, PlanError, _manual_reverb_amount
+from .plan import ROLE_GROUP, SEND_MIN, PlanError, _manual_reverb_amount
 
 #: plan vocabulary -> dsp vocabulary
 KIND_MAP = {
@@ -339,6 +339,52 @@ def _vocal_balance(buses: dict, spec: dict, sr: int, warnings: list) -> dict | N
     }
 
 
+def _parallel(sig: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dict]:
+    """The drum bus's New-York compression, with what it did to the shape."""
+    if spec.get("law") != "parallel_v1":
+        raise RenderError(f"unknown parallel compression law {spec.get('law')!r}")
+    before = analyze._envelope_crest_db(sig, sr)
+    out = dsp.parallel_compress(sig, sr, float(spec["blend"]), ratio=float(spec.get("ratio", 8.0)),
+                                threshold_offset_db=float(spec.get("threshold_offset_db", -10.0)),
+                                attack_ms=float(spec.get("attack_ms", 2.0)),
+                                release_ms=float(spec.get("release_ms", 80.0)))
+    return out, {"law": "parallel_v1", "blend": float(spec["blend"]),
+                 "crest_before_db": round(before, 2),
+                 "crest_after_db": round(analyze._envelope_crest_db(out, sr), 2)}
+
+
+def _kick_duck(sig: np.ndarray, key: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dict]:
+    """The bass bus dips under the kick; the receipt says by how much, measured."""
+    if spec.get("law") != "kick_duck_v1":
+        raise RenderError(f"unknown kick duck law {spec.get('law')!r}")
+    if spec.get("key_lowpass_hz"):
+        key = dsp.apply_eq(key, sr, [("lowpass", float(spec["key_lowpass_hz"]), 0.0, 0.707)])
+    out, gain = dsp.duck(sig, key, sr, float(spec["depth_db"]),
+                         attack_ms=float(spec.get("attack_ms", 5.0)),
+                         release_ms=float(spec.get("release_ms", 120.0)))
+    gain_db = 20.0 * np.log10(np.maximum(gain, 1e-9))
+    hits = gain_db <= -0.5 * float(spec["depth_db"])
+    return out, {"law": "kick_duck_v1", "depth_db": float(spec["depth_db"]),
+                 "under_hits_db": round(float(np.mean(gain_db[hits])), 2) if hits.any() else 0.0,
+                 "time_ducked": round(float(np.mean(gain_db <= -0.5)), 3)}
+
+
+def _vocal_delay(sent: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dict]:
+    """The delay return: echoes of what was sent, ducked while the voice sings."""
+    if spec.get("law") != "tempo_delay_v1":
+        raise RenderError(f"unknown delay law {spec.get('law')!r}")
+    wet = dsp.delay_send(sent, sr, float(spec["time_ms"]), float(spec.get("feedback", 0.0)),
+                         hpf_hz=float(spec.get("hpf_hz", 300.0)), lpf_hz=float(spec.get("lpf_hz", 5000.0)))
+    open_rms = _rms_db(wet)
+    out, gain = dsp.duck(wet, sent, sr, float(spec.get("duck_db", 0.0)), attack_ms=10.0,
+                         release_ms=float(spec.get("duck_release_ms", 250.0)), follow_hits=False)
+    return out, {"law": "tempo_delay_v1", "division": spec.get("division"),
+                 "time_ms": float(spec["time_ms"]), "bpm": (spec.get("tempo") or {}).get("bpm"),
+                 "sent_db": round(_rms_db(sent), 2),
+                 "return_vs_sent_db": round(_rms_db(out) - _rms_db(sent), 2),
+                 "ducking_db": round(_rms_db(out) - open_rms, 2)}
+
+
 def render(
     stems: list,
     plan: dict,
@@ -390,6 +436,13 @@ def render(
     if collect is not None:
         collect["stems"] = {}  # only this render's included tracks may be exported
         collect.pop("reverb", None)  # a reused collection must not retain an older return
+        collect.pop("delay", None)
+    # the style's extra moves; a plan without them renders exactly as before
+    delay_spec = plan.get("delay")
+    delay_in = np.zeros((n, 2)) if delay_spec else None
+    duck_spec = (plan.get("buses", {}).get("bass") or {}).get("duck")
+    duck_ids = set(duck_spec.get("key_ids") or []) if duck_spec else set()
+    duck_key = np.zeros((n, 2)) if duck_ids else None
 
     for st in stems:
         # the track id must come from the one place that defines it: the
@@ -530,7 +583,7 @@ def render(
                 render_warnings.append(f"{tid}: loudness match skipped: {matched['skipped']}")
 
         send = float((t.get("sends") or {}).get("plate", 0.0))
-        if send > 1e-4:
+        if send > SEND_MIN:
             # accumulate the send *inputs*; the convolution happens once below.
             # Reverb is linear, so conv(sum(x*send)) == sum(conv(x)*send) --
             # but one FFT instead of one per track, which on a 3-minute session
@@ -539,6 +592,18 @@ def render(
                 reverb_in += x * (send * send_env)[:, None].astype(x.dtype)
             else:
                 reverb_in += x * send
+
+        delay_send = float((t.get("sends") or {}).get("delay", 0.0))
+        if delay_send > SEND_MIN:
+            if delay_in is None:
+                raise RenderError(f"{tid} sends to a delay but the plan has no delay block")
+            # the sections' send contour moves every send, the delay's too
+            if send_env is not None:
+                delay_in += x * (delay_send * send_env)[:, None].astype(x.dtype)
+            else:
+                delay_in += x * delay_send
+        if tid in duck_ids:
+            duck_key += x
 
         if collect is not None:
             collect.setdefault("stems", {})[tid] = x
@@ -615,11 +680,30 @@ def render(
         del true_return
     del reverb_in
 
+    # The delay joins the fx bus after the reverb's wet/dry was measured, so
+    # that number still describes the reverb alone.
+    delay_report = None
+    if delay_in is not None and delay_in.any():
+        delay_return, delay_report = _vocal_delay(delay_in, sr, delay_spec)
+        if collect is not None:
+            collect["delay"] = delay_return
+        buses.setdefault("fx", np.zeros((n, 2)))
+        buses["fx"] += delay_return
+        del delay_return
+    del delay_in
+
     # ---- group buses
     bus_specs = plan.get("buses", {})
+    moves: dict[str, dict] = {}
     for name in buses:
         sig = buses[name]
         spec = bus_specs.get(name) or {}
+        # before the bus compressor, as on a console: the parallel copy and
+        # the sidechain shape what the glue then holds together
+        if name == "drum" and spec.get("parallel"):
+            sig, moves["drum_parallel"] = _parallel(sig, sr, spec["parallel"])
+        if name == "bass" and spec.get("duck") and duck_key is not None and duck_key.any():
+            sig, moves["kick_duck"] = _kick_duck(sig, duck_key, sr, spec["duck"])
         sig = _apply_comp(sig, sr, spec.get("comp"))
         sat = float(spec.get("saturation", 0.0))
         if sat > 1e-3:
@@ -627,6 +711,8 @@ def render(
         sig = _set_width(sig, float(spec.get("width", 1.0)))
         buses[name] = sig
         del sig
+
+    del duck_key
 
     # ---- vocal balance (plans that ask for it; older plans render as before)
     vocal_balance = _vocal_balance(buses, bus_specs.get("vocal") or {}, sr, render_warnings)
@@ -735,6 +821,10 @@ def render(
     }
     if vocal_balance is not None:
         report["vocal_balance"] = vocal_balance
+    if delay_report is not None:
+        moves["vocal_delay"] = delay_report
+    if moves:
+        report["mix_moves"] = moves
     decision = (plan.get("style") or {}).get("source_balance")
     if decision is not None:
         report["source_balance"] = json.loads(json.dumps(decision))
@@ -973,6 +1063,7 @@ def write_report(path: str, plan: dict, report: dict, stems: list) -> None:
             if (vb := report.get("vocal_balance"))
             else []
         ),
+        *_move_rows(report.get("mix_moves") or {}),
         "",
         "## Tracks",
         "",
@@ -1091,6 +1182,21 @@ def write_report(path: str, plan: dict, report: dict, stems: list) -> None:
         fh.write("\n".join(lines))
 
 
+def _move_rows(moves: dict) -> list[str]:
+    rows = []
+    if (m := moves.get("kick_duck")):
+        rows.append(f"| bass under the kick (sidechain) | {m['under_hits_db']:+.1f} dB on the hits "
+                    f"(up to -{m['depth_db']:.1f}), {100 * m['time_ducked']:.0f}% of the time |")
+    if (m := moves.get("drum_parallel")):
+        rows.append(f"| drum parallel compression | envelope crest {m['crest_before_db']:.1f} -> "
+                    f"{m['crest_after_db']:.1f} dB (blend {m['blend']:.2f}) |")
+    if (m := moves.get("vocal_delay")):
+        lock = f"{m['division']} at {m['bpm']:.1f} BPM" if m.get("bpm") else str(m["division"])
+        rows.append(f"| vocal delay | {lock} = {m['time_ms']:.0f} ms; return {m['return_vs_sent_db']:+.1f} dB "
+                    f"against what was sent; ducking under the voice moves it {m['ducking_db']:+.1f} dB on average |")
+    return rows
+
+
 def write_plan_json(path: str, plan: dict) -> None:
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(plan, fh, ensure_ascii=False, indent=2)
@@ -1182,6 +1288,12 @@ def write_stem_export(
     reverb = collected.get("reverb")
     if reverb is not None and np.any(reverb):
         signals.append(("_reverb", "return", np.asarray(reverb, dtype=np.float64)))
+    delay = collected.get("delay")
+    if delay is not None and np.any(delay):
+        signals.append(("_delay", "return", np.asarray(delay, dtype=np.float64)))
+    # only a return that is really written takes its name from the tracks;
+    # a plan without a delay exports a track called "_delay" as before
+    reserved = {tid + ".wav" for tid, kind, _ in signals if kind == "return"}
     shape = signals[0][2].shape
     if len(shape) != 2 or shape[1] != 2 or shape[0] == 0:
         raise RenderError("processed export requires nonempty stereo audio")
@@ -1203,11 +1315,11 @@ def write_stem_export(
     del total
     os.makedirs(out_dir, exist_ok=True)
     written, mapping = [], []
-    used = {"_reverb.wav", "mix.wav", "readme.txt", "_master_chain.json", "_export_report.json"}
+    used = {"_reverb.wav", "mix.wav", "readme.txt", "_master_chain.json", "_export_report.json"} | reserved
     total = np.zeros(shape, dtype=np.float64)
     for index, (tid, kind, audio) in enumerate(signals):
         if kind == "return":
-            filename = "_reverb.wav"
+            filename = tid + ".wav"
         else:
             stem = re.sub(r'[\x00-\x1f<>:"/\\|?*]', '_', tid).strip(' .')[:180] or "track"
             filename = stem + ".wav"
@@ -1236,7 +1348,7 @@ def write_stem_export(
                    "reference":"separate mix.wav, quantized with the same 24-bit writer; never add it to the stem sum",
                    "sum":"actual PCM24 readback, all listed track and return files at unity, start frame 0",
                    "bands":"mean stereo energy ((L squared + R squared) / 2), matching time-domain mean square; absolute band dBFS use this average, no mono cancellation; 20 Hz to Nyquist",
-                   "return":"_reverb.wav is the pure convolution return captured before joining the fx bus; dry fx tracks and fx-bus compression/saturation/width are excluded",
+                   "return":"_reverb.wav is the pure convolution return captured before joining the fx bus; _delay.wav (when the plan has a vocal delay) is the ducked delay return; dry fx tracks and fx-bus compression/saturation/width are excluded",
                    "gain_matched":"one least-squares scalar applied only for analysis; shape residual is relative to reference energy",
                    "null":"undefined on silence/empty band, or minus infinity for an exactly zero residual; residual_ratio=0 identifies exact zero",
                    "lufs":"whole aligned files, momentary method below 0.4 seconds; null at/below -70 LUFS floor"}}
@@ -1245,13 +1357,15 @@ def write_stem_export(
     master = p["buses"]["master"]
     normalisation = float((report or {}).get("master_gain_db",0.0))
     chain = {"description":"Partial processing settings for manual reference; not a DAW importer or exact reconstruction recipe",
-             "limitations":["Track files and the pure convolution return are pre-bus; bus saturation and the full ordered master/section signal path are not reproduced by this summary", "The original fx bus processes dry fx tracks together with the pure reverb return; this summary is not an exact DAW reconstruction recipe", "Compressor detectors and gain reduction depend on audio; matching settings in another DAW need not match DSP"],
+             "limitations":["Track files and the pure convolution return are pre-bus; bus saturation and the full ordered master/section signal path are not reproduced by this summary", "The original fx bus processes dry fx tracks together with the pure reverb return; this summary is not an exact DAW reconstruction recipe", "Compressor detectors and gain reduction depend on audio; matching settings in another DAW need not match DSP", "Drum-bus parallel compression and the bass bus's kick sidechain are bus moves and are not in the track files"],
              "master":{"eq":master.get("eq",[]),"limiter_ceiling_db":master.get("limiter",{}).get("ceiling_db"),
                        "target_lufs":master.get("target_lufs"),"true_peak_db":master.get("true_peak_db"),
                        "mono_below_hz":master.get("mono_below_hz"),"loudness_gain_db":normalisation},
-             "buses":{name:{"comp":bus.get("comp"),"width":bus.get("width"),"saturation":bus.get("saturation")}
+             "buses":{name:{"comp":bus.get("comp"),"width":bus.get("width"),"saturation":bus.get("saturation"),
+                            **{k: bus[k] for k in ("duck", "parallel") if k in bus}}
                       for name,bus in p["buses"].items() if name != "master"},
-             "reverb":p.get("reverb",{}),"export_common_gain_db":gain_db}
+             "reverb":p.get("reverb",{}),"export_common_gain_db":gain_db,
+             **({"delay": p["delay"]} if p.get("delay") else {})}
     for filename, obj in (("_master_chain.json",chain),("_export_report.json",summary)):
         path=_export_path(out_dir,filename)
         with open(path,"w",encoding="utf-8") as fh:

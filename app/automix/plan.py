@@ -45,6 +45,32 @@ VOCAL_BALANCE_LAW = "vocal_var_v1"
 VOCAL_BALANCE_MAX_BOOST_DB = 9.0
 VOCAL_BALANCE_MAX_CUT_DB = 6.0
 
+#: Three mixing moves a style can ask for (preset "techniques"); each is a
+#: block in the plan, so a plan written before they existed has none of them
+#: and renders as it did.
+#:   kick_duck_v1  -- the bass bus dips under the kick (a real sidechain,
+#:                    driven by the kick's own processed track)
+#:   parallel_v1   -- New-York compression on the drum bus
+#:   tempo_delay_v1 -- a vocal delay on the beat, ducked while the voice sings
+KICK_DUCK_LAW = "kick_duck_v1"
+KICK_DUCK_MAX_DB = 6.0
+DRUM_PARALLEL_LAW = "parallel_v1"
+VOCAL_DELAY_LAW = "tempo_delay_v1"
+#: beats per delay repeat, by musical division
+DELAY_DIVISIONS = {"1/4": 1.0, "1/8": 0.5, "1/8d": 0.75, "1/4d": 1.5}
+#: a delay is only locked to the tempo when the pulse is clear (comb score)
+#: and both halves of the song find the same one, and no 2:3 / 3:4 rival
+#: fits almost as well (dsp.TEMPO_RIVAL_SHARE).  Measured on 11 MUSDB18
+#: songs + Electron against librosa's beat tracker: at these limits 5 songs
+#: lock and all 5 are on the beat; the songs a looser limit would have added
+#: include the ones that were wrong.
+TEMPO_LOCK_MIN_STRENGTH = 0.35
+#: when the tempo is not clear: a slapback, which needs no tempo
+SLAP_MS = 110.0
+#: a send at or below this is skipped by the renderer (plate and delay alike)
+SEND_MIN = 1e-4
+SLAP_MAX_FEEDBACK = 0.15
+
 #: sources worth riding: sustained material whose level should stay put across
 #: sections.  Drums are deliberately excluded -- their dynamics *are* the part.
 RIDE_ROLES = frozenset(
@@ -802,6 +828,95 @@ def _capture_group_facts(stems: list[Stem]) -> list[dict]:
             }
         )
     return facts
+
+
+def _tempo_for_delay(stems: list[Stem], tracks: list[dict]) -> dict | None:
+    """The song's tempo, when it is clear enough to lock a delay to.
+
+    The drum tracks first (the clearest pulse); if they do not give a clear
+    answer, everything together.  None when neither does.
+    """
+    roles = {t["id"]: t["role"] for t in tracks}
+    n = max(s.audio.shape[0] for s in stems)
+    tried = []
+    for source, keep in (("drums", lambda r: ROLE_GROUP.get(r) == "drum"), ("all tracks", lambda r: True)):
+        chosen = [s for s in stems if keep(roles.get(analyze.track_id(s.name), "other"))]
+        if not chosen:
+            continue
+        total = np.zeros((n, 2))
+        for s in chosen:
+            total[: s.audio.shape[0]] += s.audio
+        found = dsp.estimate_tempo(total, stems[0].sr)
+        del total
+        if found is None:
+            continue
+        found["source"] = source
+        tried.append(found)
+        if (found["strength"] >= TEMPO_LOCK_MIN_STRENGTH and found["halves_agree"] == 2
+                and not found.get("ambiguous")):
+            return found
+    return None
+
+
+def _mix_techniques(preset: dict, intensity: float, stems: list[Stem], tracks: list[dict],
+                    buses: dict, grouped_ids: set, warnings: list) -> dict | None:
+    """Write the style's sidechain, parallel and delay moves into the plan.
+
+    Bus blocks are added in place; the delay block is returned (it belongs at
+    the top of the plan, next to the reverb).  Every amount scales with the
+    intensity, as the style's other moves do.
+    """
+    tech = dict(preset.get("techniques") or {})
+    by_role: dict[str, list[str]] = {}
+    for t in tracks:
+        by_role.setdefault(t["role"], []).append(t["id"])
+    has = lambda group: any(ROLE_GROUP.get(t["role"], "music") == group for t in tracks)
+
+    depth = min(KICK_DUCK_MAX_DB, float(tech.get("kick_duck_db", 0.0)) * float(intensity))
+    if depth >= 0.5 and has("bass"):
+        duck = None
+        if by_role.get("kick"):
+            duck = {"key_ids": sorted(by_role["kick"])}
+        elif by_role.get("drums_full"):
+            # a whole kit: listen to its low end only, where the kick is
+            duck = {"key_ids": sorted(by_role["drums_full"]), "key_lowpass_hz": 150.0}
+        if duck is not None:
+            buses["bass"]["duck"] = {"law": KICK_DUCK_LAW, **duck, "depth_db": round(depth, 2),
+                                     "attack_ms": 5.0, "release_ms": 120.0}
+
+    blend = min(1.0, float(tech.get("drum_parallel", 0.0)) * float(intensity))
+    if blend >= 0.05 and has("drum"):
+        buses["drum"]["parallel"] = {"law": DRUM_PARALLEL_LAW, "blend": round(blend, 3), "ratio": 8.0,
+                                     "threshold_offset_db": -10.0, "attack_ms": 2.0, "release_ms": 80.0}
+
+    spec = dict(tech.get("vocal_delay") or {})
+    send = float(spec.get("send", 0.0)) * float(intensity)
+    singers = [t for t in tracks if t["role"] in analyze.VOCAL_ROLES and t["id"] not in grouped_ids]
+    if send < 0.01 or not singers:
+        return None
+    division = str(spec.get("division", "slap"))
+    feedback = float(spec.get("feedback", 0.0))
+    tempo = None
+    if division in DELAY_DIVISIONS:
+        tempo = _tempo_for_delay(stems, tracks)
+        if tempo is None:
+            warnings.append(f"vocal delay: no clear tempo, so a {SLAP_MS:.0f} ms slapback instead of a {division} delay")
+    if tempo is not None:
+        time_ms = 60000.0 / float(tempo["bpm"]) * DELAY_DIVISIONS[division]
+        # beyond a second and a half an echo is a separate event, not a delay
+        while time_ms > 1500.0:
+            time_ms /= 2.0
+    else:
+        division, time_ms, feedback = "slap", SLAP_MS, min(feedback, SLAP_MAX_FEEDBACK)
+    for t in singers:
+        amount = send if t["role"] == "lead_vocal" else send * 0.5
+        t["sends"] = {**(t.get("sends") or {}), "delay": round(amount, 3)}
+    block = {"law": VOCAL_DELAY_LAW, "division": division, "time_ms": round(time_ms, 2),
+             "feedback": round(feedback, 3), "hpf_hz": 300.0, "lpf_hz": 5000.0,
+             "duck_db": 6.0, "duck_release_ms": 250.0}
+    if tempo is not None:
+        block["tempo"] = tempo
+    return block
 
 
 def _sync_unmask_targets(summary: dict, tracks: list[dict]) -> None:
@@ -1573,6 +1688,7 @@ def build_plan(
                     min(6.0, max(-12.0, k_vocal * source_db + (1.0 - k_vocal) * style_db)), 2
                 )
         buses["vocal"]["balance"] = balance
+    delay_block = _mix_techniques(preset, intensity, stems, tracks, buses, grouped_ids, warnings)
     # the preset's tonal tilt is a *master* curve: it describes the finished
     # mix's balance, so it is written into the master EQ rather than spread
     # across the tracks (which would apply it several times over).
@@ -1766,6 +1882,8 @@ def build_plan(
         },
         "warnings": warnings,
     }
+    if delay_block is not None:
+        plan["delay"] = delay_block
     if decode_policy is not None:
         # Only recorded when it is known.  A plan without it was built from
         # material whose origin nobody can vouch for, and it is replayed the
@@ -2109,8 +2227,39 @@ def _engine_invariants(plan: dict) -> None:
         # a setting that silently does nothing
         if name != "vocal" and isinstance(bus, dict) and "balance" in bus:
             raise PlanError(f"buses.{name}.balance: only the vocal bus has a balance target")
+        # the same for the other bus-only moves: each has one bus that reads it
+        for key, owner in (("duck", "bass"), ("parallel", "drum")):
+            if name != owner and isinstance(bus, dict) and key in bus:
+                raise PlanError(f"buses.{name}.{key}: only the {owner} bus has one")
     if not plan["tracks"]:
         raise PlanError("plan has no tracks")
+    # Each move must have something to act on; otherwise it is a setting that
+    # silently does nothing (the renderer only runs buses that have tracks).
+    roles = {t.get("id"): t.get("role") for t in plan["tracks"] if isinstance(t, dict)}
+    groups = {ROLE_GROUP.get(r, "music") for r in roles.values()}
+    buses_in = plan["buses"] or {}
+    duck = (buses_in.get("bass") or {}).get("duck")
+    if duck is not None:
+        keys = duck.get("key_ids") or []
+        missing = [k for k in keys if k not in roles]
+        if not keys or missing:
+            raise PlanError(f"buses.bass.duck: key tracks not in the plan: {missing or 'none given'}")
+        wrong = [k for k in keys if roles[k] not in ("kick", "drums_full")]
+        if wrong:
+            raise PlanError(f"buses.bass.duck: a key must be a kick or a whole kit, not {wrong}")
+        if any(roles[k] == "drums_full" for k in keys) and not duck.get("key_lowpass_hz"):
+            raise PlanError("buses.bass.duck: a whole-kit key needs key_lowpass_hz (its kick is in the low end)")
+        if "bass" not in groups:
+            raise PlanError("buses.bass.duck: the plan has no bass track to duck")
+    if (buses_in.get("drum") or {}).get("parallel") is not None and "drum" not in groups:
+        raise PlanError("buses.drum.parallel: the plan has no drum track")
+    # the renderer's own threshold: a send it would skip is no send
+    sending = any(float(((t.get("sends") or {}).get("delay") or 0.0)) > SEND_MIN
+                  for t in plan["tracks"] if isinstance(t, dict))
+    if plan.get("delay") is None and sending:
+        raise PlanError("tracks send to a delay but the plan has no delay block")
+    if plan.get("delay") is not None and not sending:
+        raise PlanError("the plan has a delay block but no track sends to it; remove the block or give a track sends.delay")
     # The schema says which decoder policies exist; this says it again, so a
     # plan checked against some other, more permissive schema still cannot
     # smuggle an unknown decoder past the engine.

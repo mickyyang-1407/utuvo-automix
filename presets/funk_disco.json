@@ -68,8 +68,17 @@
   },
   "intent": {
     "applicability": "適合鼓、貝斯與和聲樂器互相呼應的節奏編曲。",
-    "caveat": "沒有節拍追蹤或自動groove修正；聲部比例仍取決於來源與保留量。",
+    "caveat": "人聲delay會跟著偵測到的速度走（速度不清楚時改用短回音），但沒有自動groove修正；聲部比例仍取決於來源與保留量。",
     "numeric_basis": "UTUVO自己調出來的起點數值，不是音質保證。",
     "source_refs": []
+  },
+  "techniques": {
+    "kick_duck_db": 2.0,
+    "drum_parallel": 0.4,
+    "vocal_delay": {
+      "send": 0.06,
+      "division": "1/8",
+      "feedback": 0.15
+    }
   }
 }

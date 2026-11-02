@@ -288,6 +288,82 @@
       "items": {
         "type": "string"
       }
+    },
+    "delay": {
+      "description": "The vocal delay that tracks' sends.delay feed. Locked to the song's tempo when it is clear (tempo records what was found), otherwise a slapback. The return is ducked while the sent signal plays and joins the fx bus.",
+      "type": "object",
+      "required": [
+        "law",
+        "time_ms"
+      ],
+      "properties": {
+        "law": {
+          "enum": [
+            "tempo_delay_v1"
+          ]
+        },
+        "division": {
+          "enum": [
+            "1/4",
+            "1/8",
+            "1/8d",
+            "1/4d",
+            "slap"
+          ]
+        },
+        "time_ms": {
+          "type": "number",
+          "minimum": 10,
+          "maximum": 2000
+        },
+        "feedback": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.9
+        },
+        "hpf_hz": {
+          "type": "number",
+          "minimum": 20,
+          "maximum": 2000
+        },
+        "lpf_hz": {
+          "type": "number",
+          "minimum": 1000,
+          "maximum": 20000
+        },
+        "duck_db": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 24
+        },
+        "duck_release_ms": {
+          "type": "number",
+          "minimum": 10,
+          "maximum": 2000
+        },
+        "tempo": {
+          "type": "object",
+          "properties": {
+            "bpm": {
+              "type": "number"
+            },
+            "strength": {
+              "type": "number"
+            },
+            "halves_agree": {
+              "type": "integer"
+            },
+            "ambiguous": {
+              "type": "boolean"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": true,
@@ -823,6 +899,91 @@
             "source_db": {
               "description": "The vocal against the rest in the stems as delivered; only recorded when their balance was vouched for.",
               "type": "number"
+            }
+          },
+          "additionalProperties": false
+        },
+        "duck": {
+          "description": "Bass bus only: a sidechain. The bass bus dips by up to depth_db while the key tracks (the kick, or a whole kit's low end) hit; the dip follows how hard they hit. Plans without it are rendered as before.",
+          "type": "object",
+          "required": [
+            "law",
+            "key_ids",
+            "depth_db"
+          ],
+          "properties": {
+            "law": {
+              "enum": [
+                "kick_duck_v1"
+              ]
+            },
+            "key_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "key_lowpass_hz": {
+              "type": "number",
+              "minimum": 40,
+              "maximum": 500
+            },
+            "depth_db": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 12
+            },
+            "attack_ms": {
+              "type": "number",
+              "minimum": 0.5,
+              "maximum": 50
+            },
+            "release_ms": {
+              "type": "number",
+              "minimum": 10,
+              "maximum": 1000
+            }
+          },
+          "additionalProperties": false
+        },
+        "parallel": {
+          "description": "Drum bus only: New-York compression. A hard-compressed copy is mixed under the bus at blend of its level and the sum is returned at the bus's own level. Plans without it are rendered as before.",
+          "type": "object",
+          "required": [
+            "law",
+            "blend"
+          ],
+          "properties": {
+            "law": {
+              "enum": [
+                "parallel_v1"
+              ]
+            },
+            "blend": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "ratio": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 30
+            },
+            "threshold_offset_db": {
+              "type": "number",
+              "minimum": -40,
+              "maximum": 0
+            },
+            "attack_ms": {
+              "type": "number",
+              "minimum": 0.5,
+              "maximum": 100
+            },
+            "release_ms": {
+              "type": "number",
+              "minimum": 10,
+              "maximum": 1000
             }
           },
           "additionalProperties": false

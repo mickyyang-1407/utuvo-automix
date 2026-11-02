@@ -72,17 +72,25 @@ SR = 48000
 #: -10.66, crest 11.54 -> 11.41, width .106 -> .122, correlation .980 ->
 #: .974.  Intended.  Saved plans without the vocal balance block render
 #: exactly as before.
+#: 2026-11-02 (R111): pop_2020s now asks for three more mixing moves: the
+#: bass dips under the kick (up to 2 dB; measured -1.65 dB on the hits), the
+#: drum bus gets parallel compression (envelope crest 14.4 -> 12.7 dB) and
+#: the vocal a 1/4-note delay locked to the demo's 100 BPM (600 ms).  Less
+#: bass under the kick: low .3412 -> .3129; the delay adds vocal energy:
+#: mid .1486 -> .1579, presence .0219 -> .0249, air .0294 -> .0374.  LUFS
+#: -10.66 -> -10.61, crest 11.41 -> 11.54, width .122 -> .120.  Intended.
+#: Plans without the three blocks render exactly as before.
 EXPECTED = {
-    "lufs": -10.66,
-    "crest_db": 11.41,
-    "width": 0.122,
+    "lufs": -10.61,
+    "crest_db": 11.54,
+    "width": 0.120,
     "correlation": 0.974,
     "band_energy": {
-        "low": 0.3412,
-        "low_mid": 0.4373,
-        "mid": 0.1486,
-        "presence": 0.0219,
-        "air": 0.0294,
+        "low": 0.3129,
+        "low_mid": 0.4399,
+        "mid": 0.1579,
+        "presence": 0.0249,
+        "air": 0.0374,
     },
 }
 

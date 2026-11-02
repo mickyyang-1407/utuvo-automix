@@ -916,3 +916,232 @@ def width_ratio(x: np.ndarray) -> float:
     m = 0.5 * (x[:, 0] + x[:, 1])
     s = 0.5 * (x[:, 0] - x[:, 1])
     return float(np.sqrt(np.mean(s * s)) / (np.sqrt(np.mean(m * m)) + EPS))
+
+
+# ------------------------------------------------- sidechain, parallel, delay
+
+
+def key_level_db(key: np.ndarray, sr: int, attack_ms: float) -> np.ndarray:
+    """The key's own short-window level, with no hold: what it really does."""
+    mag = np.sqrt(np.mean(key * key, axis=1)) if key.ndim == 2 else np.abs(key)
+    level = _box_smooth(mag * mag, max(1, int(sr * attack_ms / 1000.0)))
+    return 10.0 * np.log10(np.maximum(level, EPS * EPS))
+
+
+def key_envelope_db(key: np.ndarray, sr: int, attack_ms: float, release_ms: float,
+                    level_db: np.ndarray | None = None) -> np.ndarray:
+    """A detector that rises at once and falls ``20 dB`` per ``release_ms``.
+
+    The compressor's box envelope is symmetric, so a duck built on it would
+    start dipping the bass half a release *before* the kick hits.  This one
+    is causal on the way down: a peak hold with a straight-line release in
+    dB, which is the running maximum of ``level + slope*n`` minus the slope.
+    """
+    if level_db is None:
+        level_db = key_level_db(key, sr, attack_ms)
+    slope = 20.0 / max(1.0, sr * release_ms / 1000.0)
+    ramp = slope * np.arange(level_db.shape[0], dtype=np.float64)
+    return np.maximum.accumulate(level_db + ramp) - ramp
+
+
+#: how far a key's hits must stand above its resting level to be followed
+DUCK_MIN_HIT_DB = 6.0
+
+
+def duck(
+    x: np.ndarray,
+    key: np.ndarray,
+    sr: int,
+    depth_db: float,
+    attack_ms: float = 5.0,
+    release_ms: float = 120.0,
+    follow_hits: bool = True,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Turn ``x`` down by up to ``depth_db`` while ``key`` hits.
+
+    The dip scales with how hard the key hits: its loudest hits (the 99th
+    percentile of its level where it is present) get the full depth, and its
+    resting level gets none, so a kick track with rumble or bleed under it
+    does not hold the bass down between hits.  The resting level is the
+    median of the key's own level without the detector's hold (silence
+    counted as 60 dB down): the hold's release tails would raise it on a
+    dense kick pattern and leave real hits under-ducked.
+    A key with less than ``DUCK_MIN_HIT_DB`` between the two has no hits to
+    follow and leaves ``x`` alone.  With ``follow_hits=False`` the key's
+    presence counts, not its hits (a sustained voice ducking its own delay):
+    no resting level is taken off.  Returns (signal, gain curve).
+    """
+    level_db = key_level_db(key, sr, attack_ms)
+    env_db = key_envelope_db(key, sr, attack_ms, release_ms, level_db=level_db)
+    peak_db = float(np.max(level_db))
+    present = level_db[level_db > peak_db - 60.0]
+    if depth_db <= 0.0 or present.size == 0:
+        return x, np.ones(x.shape[0])
+    ref_db = float(np.percentile(present, 99.0))
+    rel = 10.0 ** ((env_db - ref_db) / 20.0)
+    if follow_hits:
+        floor_db = float(np.percentile(np.maximum(level_db, peak_db - 60.0), 50.0))
+        if ref_db - floor_db < DUCK_MIN_HIT_DB:
+            return x, np.ones(x.shape[0])
+        floor = 10.0 ** ((floor_db - ref_db) / 20.0)
+        amount = np.clip((rel - floor) / (1.0 - floor), 0.0, 1.0)
+    else:
+        amount = np.clip(rel, 0.0, 1.0)
+    gain = 1.0 - (1.0 - db_to_lin(-float(depth_db))) * amount
+    g = gain.astype(x.dtype, copy=False)
+    return (x * g[:, None] if x.ndim == 2 else x * g), gain
+
+
+def parallel_compress(
+    x: np.ndarray,
+    sr: int,
+    blend: float,
+    ratio: float = 8.0,
+    threshold_offset_db: float = -10.0,
+    attack_ms: float = 2.0,
+    release_ms: float = 80.0,
+) -> np.ndarray:
+    """New-York compression: a crushed copy under the dry signal.
+
+    The copy is compressed hard and brought back to the dry level, then mixed
+    in at ``blend`` of that level.  The sum is returned at the dry signal's
+    RMS, so the bus keeps its place in the balance and only its shape changes:
+    quiet detail and sustain come up against the transients.
+    """
+    if blend <= 1e-3:
+        return x
+    rms = float(np.sqrt(np.mean(x.astype(np.float64) ** 2)))
+    if rms <= EPS:
+        return x
+    crushed = compress(x, sr, 1.0, threshold_db=lin_to_db(rms) + threshold_offset_db,
+                       ratio_max=ratio, attack_ms=attack_ms, release_ms=release_ms,
+                       makeup_mode="none")
+    c_rms = float(np.sqrt(np.mean(crushed.astype(np.float64) ** 2)))
+    if c_rms <= EPS:
+        return x
+    y = x + crushed * (blend * rms / c_rms)
+    y_rms = float(np.sqrt(np.mean(y.astype(np.float64) ** 2)))
+    return (y * (rms / y_rms)).astype(x.dtype, copy=False)
+
+
+def onset_envelope(x: np.ndarray, sr: int) -> tuple[np.ndarray, float]:
+    """Spectral flux every 10 ms: how much new energy each frame brings."""
+    mono = np.mean(x, axis=1) if x.ndim == 2 else x
+    hop = max(1, int(round(sr * 0.01)))
+    win = 1 << int(math.ceil(math.log2(sr * 0.04)))
+    frames = 1 + (mono.shape[0] - win) // hop if mono.shape[0] >= win else 0
+    if frames < 2:
+        return np.zeros(0), sr / hop
+    window = np.hanning(win)
+    out = np.empty(frames)
+    prev = None
+    step = 2048  # frames per block keeps the STFT's memory small on long songs
+    view = np.lib.stride_tricks.sliding_window_view(mono, win)[::hop]
+    for start in range(0, frames, step):
+        block = view[start:start + step] * window
+        mag = np.log1p(100.0 * np.abs(np.fft.rfft(block, axis=1)))
+        if prev is None:
+            diff = np.vstack([np.zeros((1, mag.shape[1])), np.diff(mag, axis=0)])
+        else:
+            diff = np.diff(np.vstack([prev, mag]), axis=0)
+        out[start:start + mag.shape[0]] = np.maximum(diff, 0.0).sum(axis=1)
+        prev = mag[-1:]
+    return out, sr / hop
+
+
+#: the tempo prior: a log-normal around 120 BPM, one octave wide.  It only
+#: decides between metrical levels that fit the onsets about equally well.
+TEMPO_PRIOR_BPM = 120.0
+TEMPO_RANGE_BPM = (60.0, 200.0)
+#: tempi a beat is easily mistaken for, other than double and half
+TEMPO_RIVAL_RATIOS = (2.0 / 3.0, 1.5, 0.75, 4.0 / 3.0)
+#: a rival scoring this close to the answer makes the tempo unclear
+TEMPO_RIVAL_SHARE = 0.9
+
+
+def _tempo_scores(env: np.ndarray, fps: float, bpms: np.ndarray) -> np.ndarray:
+    e = env - _box_smooth(env, max(3, int(fps)))  # local mean off: keep the pulses
+    e = np.maximum(e, 0.0)
+    n = e.shape[0]
+    spec = np.fft.rfft(e, _next_fast_len(2 * n))
+    acf = np.fft.irfft(spec * np.conj(spec))[:n]
+    if acf[0] <= EPS:
+        return np.zeros_like(bpms)
+    acf = acf / acf[0]
+    lags = np.arange(n, dtype=np.float64)
+    score = np.zeros_like(bpms)
+    # the beat and its multiples, plus its half: a real beat is usually
+    # subdivided, while a period of three eighth-notes (which the multiples
+    # alone cannot tell from the beat) has nothing at its half
+    for k, w in ((0.5, 0.5), (1, 1.0), (2, 0.5), (3, 0.33), (4, 0.25)):
+        score += w * np.interp(k * 60.0 * fps / bpms, lags, acf, right=0.0)
+    return score / 2.58
+
+
+def estimate_tempo(x: np.ndarray, sr: int) -> dict | None:
+    """Beats per minute from the onsets, or None when there is no steady pulse.
+
+    Autocorrelation of the onset envelope, scored as a comb (the beat and its
+    multiples), on a 0.1 BPM grid.  The answer has to hold in both halves of
+    the song on its own: a tempo that only one half agrees with is not one a
+    delay should be locked to.
+    """
+    env, fps = onset_envelope(x, sr)
+    if env.shape[0] < fps * 8:
+        return None
+    bpms = np.arange(TEMPO_RANGE_BPM[0], TEMPO_RANGE_BPM[1] + 1e-9, 0.1)
+    prior = np.exp(-0.5 * np.log2(bpms / TEMPO_PRIOR_BPM) ** 2)
+    whole = _tempo_scores(env, fps, bpms)
+    best = int(np.argmax(whole * prior))
+    bpm = float(bpms[best])
+    strength = float(whole[best])
+    # A pulse at 2:3 or 3:4 of the answer that fits almost as well is a
+    # different beat a delay could just as well lock to (a dotted or triplet
+    # feel): that is not a clear tempo, whatever the strength says.
+    rival = 0.0
+    for r in TEMPO_RIVAL_RATIOS:
+        lo, hi = bpm * r * 0.98, bpm * r * 1.02
+        near = (bpms >= lo) & (bpms <= hi)
+        if near.any():
+            rival = max(rival, float(np.max((whole * prior)[near])))
+    ambiguous = rival >= TEMPO_RIVAL_SHARE * float(whole[best] * prior[best])
+    half = env.shape[0] // 2
+    agree = 0
+    for part in (env[:half], env[half:]):
+        if part.shape[0] < fps * 4:
+            continue
+        s = _tempo_scores(part, fps, bpms)
+        b = float(bpms[int(np.argmax(s * prior))])
+        # the same pulse, or the same pulse counted at double/half speed
+        if min(abs(b / bpm - r) for r in (0.5, 1.0, 2.0)) <= 0.02:
+            agree += 1
+    return {"bpm": round(bpm, 1), "strength": round(strength, 3), "halves_agree": agree,
+            "ambiguous": bool(ambiguous)}
+
+
+def delay_send(
+    dry: np.ndarray,
+    sr: int,
+    time_ms: float,
+    feedback: float,
+    hpf_hz: float = 300.0,
+    lpf_hz: float = 5000.0,
+) -> np.ndarray:
+    """A delay *send*: the echoes only, band-limited like a real return.
+
+    Repeats at ``time_ms``, each ``feedback`` times the one before, until
+    they are 40 dB down.
+    """
+    d = int(round(sr * time_ms / 1000.0))
+    out = np.zeros_like(dry)
+    if d <= 0 or d >= dry.shape[0]:
+        return out
+    gain, k = 1.0, 1
+    while gain >= 0.01 and k * d < dry.shape[0]:
+        out[k * d:] += dry[:-k * d] * gain
+        gain *= float(feedback)
+        k += 1
+        if feedback <= 0.0:
+            break
+    return apply_eq(out, sr, [("highpass", hpf_hz, 0.0, 0.707),
+                              ("lowpass", min(lpf_hz, sr * 0.45), 0.0, 0.707)])

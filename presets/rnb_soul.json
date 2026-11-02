@@ -71,5 +71,14 @@
     "caveat": "不是特定年代、藝人或器材的重現；密集人聲需以等響度A/B確認。",
     "numeric_basis": "UTUVO自己調出來的起點數值，不是音質保證。",
     "source_refs": []
+  },
+  "techniques": {
+    "kick_duck_db": 2.0,
+    "drum_parallel": 0.3,
+    "vocal_delay": {
+      "send": 0.12,
+      "division": "1/4",
+      "feedback": 0.3
+    }
   }
 }

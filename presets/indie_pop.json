@@ -71,5 +71,14 @@
     "caveat": "名稱不代表藝術家的聲音；請依演出意圖與參考曲調整。",
     "numeric_basis": "UTUVO自己調出來的起點數值，不是音質保證。",
     "source_refs": []
+  },
+  "techniques": {
+    "kick_duck_db": 1.5,
+    "drum_parallel": 0.3,
+    "vocal_delay": {
+      "send": 0.1,
+      "division": "1/4",
+      "feedback": 0.3
+    }
   }
 }
