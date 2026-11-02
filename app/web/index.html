@@ -135,7 +135,19 @@
   th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}
   th{color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.07em}
   td.num{text-align:right;font-variant-numeric:tabular-nums}
-  .warns{margin-top:12px;display:flex;flex-direction:column;gap:6px}
+  /* one box for every notice of a mix, closed until asked for */
+  .notes{margin-top:12px;border:1px solid #4a3c14;background:#1d190e;border-radius:10px}
+  .notes summary,.trackbox summary{cursor:pointer;padding:9px 12px;font-size:13px;list-style:none}
+  .notes summary::-webkit-details-marker,.trackbox summary::-webkit-details-marker{display:none}
+  .notes summary::before,.trackbox summary::before{content:"▸";display:inline-block;width:14px;color:var(--dim)}
+  .notes[open] summary::before,.trackbox[open] summary::before{content:"▾"}
+  .notes summary{color:var(--warn)}
+  .notes ul{margin:0;padding:0 14px 10px 30px;font-size:12.5px;color:var(--ink);line-height:1.55}
+  .notes li{margin:3px 0;overflow-wrap:anywhere}
+  .trackbox{margin-top:12px;border:1px solid var(--line);border-radius:10px}
+  .trackbox summary{color:var(--ink)}
+  .trackbox .hint{padding:0 12px}
+  .trackbox table{margin:4px 0 6px}
   .checks{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
   .check{font-size:11.5px;padding:4px 9px;border-radius:7px;border:1px solid var(--line);color:var(--dim)}
   .check b{color:var(--ink);font-weight:500;margin-left:6px}
@@ -363,8 +375,15 @@
     <div class="checks" id="checks"></div>
     <div class="sections" id="sections"></div>
     <div class="gscope hide" id="groupscope"></div>
-    <div class="warns" id="warns"></div>
-    <table id="tracks"></table>
+    <details class="notes hide" id="warnbox">
+      <summary id="warnsum"></summary>
+      <ul id="warns"></ul>
+    </details>
+    <details class="trackbox" id="trackbox">
+      <summary id="tracksum"></summary>
+      <div class="hint" id="trackhint"></div>
+      <table id="tracks"></table>
+    </details>
     <div class="links">
       <a id="dlmix" href="#">下載 mix.wav</a>
       <a id="dlplan" href="#" target="_blank">看 mixplan.json</a>
@@ -2039,14 +2058,12 @@ if (receipt && (receipt.groups || []).length) {
   gs.classList.add("hide");
 }
 
-const w = $("warns");
-  w.innerHTML = "";
-  (r.warnings || []).forEach(t => {
-    const d = document.createElement("div");
-    d.className = "warn";
-    d.textContent = t;
-    w.appendChild(d);
-  });
+  renderNotes(r.warnings || []);
+  $("tracksum").textContent = L(`每一軌做了什麼（${r.tracks.length} 軌）`,
+    `What was done to each track (${r.tracks.length})`);
+  $("trackhint").textContent = L(
+    "這不是重新分析：是這次混音對每一軌下的決定（音量、左右位置、低切、殘響、人聲讓位）。要改就按 ◀ ▶ 或 − +，再按一次混音。",
+    "This is not the analysis again: it is what this mix decided for each track (level, position, low cut, reverb, vocal carve). To change one, use ◀ ▶ or − +, then mix again.");
 
   tracksInfo = {};
   pansInfo = {};
@@ -2110,6 +2127,33 @@ const w = $("warns");
   setAB("mix", {fresh: true});
   $("status").textContent = L(`${r.tracks.length} 軌完成`,
     `${r.tracks.length} track${r.tracks.length === 1 ? "" : "s"} done`);
+}
+
+// Every notice of a mix in one closed box.  Notices of the same kind (a stem
+// that is mostly silence) are folded into one line; the text is the
+// engine's own and is written as text.
+function renderNotes(list) {
+  const box = $("warnbox"), ul = $("warns");
+  ul.replaceChildren();
+  const silent = [], rest = [];
+  list.forEach(t => {
+    const m = /^(.+?): (\d+)% of the file is silence/.exec(String(t));
+    if (m) silent.push(`${m[1]} ${m[2]}%`); else rest.push(String(t));
+  });
+  const lines = [];
+  if (silent.length) lines.push(L(
+    `${silent.length} 軌大部分是靜音，確認是不是你要的分軌：${silent.join("、")}`,
+    `${silent.length} track${silent.length === 1 ? " is" : "s are"} mostly silence; check ${silent.length === 1 ? "it is the stem" : "they are the stems"} you meant: ${silent.join(", ")}`));
+  lines.push(...rest);
+  lines.forEach(t => {
+    const li = document.createElement("li");
+    li.textContent = t;
+    ul.appendChild(li);
+  });
+  $("warnsum").textContent = L(`${lines.length} 則提醒（點開看）`,
+    `${lines.length} note${lines.length === 1 ? "" : "s"} (click to read)`);
+  box.open = false;
+  box.classList.toggle("hide", !lines.length);
 }
 
 async function drawWave(kind) {
