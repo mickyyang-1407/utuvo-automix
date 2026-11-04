@@ -167,9 +167,10 @@ def _r25_wav_sha(case: str) -> str:
 
 def _without_ratio_law(plan: dict) -> dict:
     """R104 added ``ratio_law`` to every compressor, R109 a vocal balance
-    block to the vocal bus, and R111 the style's mixing moves (bass duck, drum
-    parallel compression, vocal delay and its sends); R25 plans predate all
-    of them.  A plan without them still renders the R25 way, so they are set
+    block to the vocal bus, R111 the style's mixing moves (bass duck, drum
+    parallel compression, vocal delay and its sends) and R114 the vocal
+    character, drum/bass balance, release limiter, plate_v2 reverb and side
+    air; R25 plans predate all of them.  A plan without them still renders the R25 way, so they are set
     aside here."""
     plan = json.loads(json.dumps(plan))
     for block in plan.get("tracks", []) + list(plan.get("buses", {}).values()):
@@ -178,6 +179,21 @@ def _without_ratio_law(plan: dict) -> dict:
     plan.get("buses", {}).get("vocal", {}).pop("balance", None)
     plan.get("buses", {}).get("bass", {}).pop("duck", None)
     plan.get("buses", {}).get("drum", {}).pop("parallel", None)
+    # R114: vocal character, drum/bass balance, release limiter, plate_v2
+    # reverb and side air -- all new-plan fields that old plans lack
+    plan.get("buses", {}).get("vocal", {}).pop("character", None)
+    for part in ("drum", "bass"):
+        plan.get("buses", {}).get(part, {}).pop("balance", None)
+    master = plan.get("buses", {}).get("master", {})
+    (master.get("limiter") or {}).pop("law", None)
+    master.pop("side_air_db", None)
+    (plan.get("reverb") or {}).pop("ir_law", None)
+    # R114 also raised the lead vocal's reverb weight 0.55 -> 0.75 (a planner
+    # number, not a renderer change): undo it for the comparison
+    for track in plan.get("tracks", []):
+        sends = track.get("sends") or {}
+        if track.get("role") == "lead_vocal" and sends.get("plate"):
+            sends["plate"] = round(sends["plate"] * 0.55 / 0.75, 3)
     plan.pop("delay", None)
     for track in plan.get("tracks", []):
         (track.get("sends") or {}).pop("delay", None)

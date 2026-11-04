@@ -43,10 +43,11 @@ def test_existing_six_numerical_states_unchanged():
         p = plan.load_preset(id)
         numbers = {key: p[key] for key in NUMERIC_KEYS}
         if isinstance(numbers.get("role_gains_db"), dict):
-            # R109 added the overheads and room roles; every number that was
-            # already there must still be the same
+            # R109 added the overheads and room roles, R113 percussion and
+            # woodwinds; every number that was already there must still be
+            # the same
             numbers["role_gains_db"] = {k: v for k, v in numbers["role_gains_db"].items()
-                                        if k not in ("overheads", "room")}
+                                        if k not in ("overheads", "room", "percussion", "woodwinds")}
         got = hashlib.sha256(json.dumps(numbers, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         assert got == wanted, id
 

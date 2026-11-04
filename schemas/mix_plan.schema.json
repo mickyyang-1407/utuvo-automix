@@ -14,7 +14,8 @@
   "properties": {
     "reverb": {
       "properties": {
-        "manual_amount": {"type": "number", "minimum": 0, "maximum": 1}
+        "manual_amount": {"type": "number", "minimum": 0, "maximum": 1},
+        "ir_law": {"description": "The reverb's impulse response. noise_v1 (the default, what plans without this field were rendered with) is one noise burst decaying at one rate; plate_v2 decays by band, has early reflections, builds up over 15 ms and carries nothing below 200 Hz.", "enum": ["noise_v1", "plate_v2"]}
       },
       "additionalProperties": true
     },
@@ -379,6 +380,7 @@
         "overheads",
         "room",
         "drums_full",
+        "percussion",
         "bass",
         "sub_808",
         "lead_vocal",
@@ -391,6 +393,7 @@
         "pad",
         "strings",
         "brass",
+        "woodwinds",
         "fx",
         "other"
       ]
@@ -863,7 +866,7 @@
           "default": 1
         },
         "balance": {
-          "description": "Vocal bus only: after bus processing the renderer measures the vocal against everything else where the vocal sings (median of 3 s K-weighted windows) and moves the whole vocal bus to target_db, within the limits. Plans without it are rendered as before.",
+          "description": "After bus processing the renderer measures a bus where it plays (median of 3 s K-weighted windows) and moves the whole bus to target_db, within the limits: the vocal bus (vocal_var_v1) against everything else, the drum and bass buses (part_var_v1) against the rest of the band without the vocal; drums and bass first, then the vocal. Plans without it are rendered as before.",
           "type": "object",
           "required": [
             "law",
@@ -872,7 +875,8 @@
           "properties": {
             "law": {
               "enum": [
-                "vocal_var_v1"
+                "vocal_var_v1",
+                "part_var_v1"
               ]
             },
             "target_db": {
@@ -881,19 +885,19 @@
               "maximum": 6
             },
             "max_boost_db": {
+              "description": "Largest boost. When absent: 9 dB for vocal_var_v1, 6 dB for part_var_v1 (planners always write it).",
               "type": "number",
               "minimum": 0,
-              "maximum": 18,
-              "default": 9
+              "maximum": 18
             },
             "max_cut_db": {
+              "description": "Largest cut. When absent: 6 dB for both laws.",
               "type": "number",
               "minimum": 0,
-              "maximum": 18,
-              "default": 6
+              "maximum": 18
             },
             "style_db": {
-              "description": "What the style alone asks for: professional median plus the style's vocal_forward_db.",
+              "description": "What the style alone asks for: for the vocal, the professional median plus the style's vocal_forward_db and techniques.vocal_lift_db.",
               "type": "number"
             },
             "source_db": {
@@ -987,6 +991,46 @@
             }
           },
           "additionalProperties": false
+        },
+        "character": {
+          "description": "Vocal bus only: weight and edge after the bus compressor -- a parallel compressed copy (parallel_blend of the bus level, sum returned at the bus level), saturation, then body (220 Hz), presence (4 kHz) and air (11 kHz shelf) EQ. The vocal balance step that follows sets the level. Plans without it are rendered as before.",
+          "type": "object",
+          "required": [
+            "law"
+          ],
+          "properties": {
+            "law": {
+              "enum": [
+                "vocal_character_v1"
+              ]
+            },
+            "parallel_blend": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "saturation": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 0.5
+            },
+            "body_db": {
+              "type": "number",
+              "minimum": -6,
+              "maximum": 6
+            },
+            "presence_db": {
+              "type": "number",
+              "minimum": -6,
+              "maximum": 6
+            },
+            "air_db": {
+              "type": "number",
+              "minimum": -6,
+              "maximum": 6
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": true
@@ -1025,6 +1069,10 @@
               "minimum": 10,
               "maximum": 500,
               "default": 80
+            },
+            "law": {
+              "description": "How the true-peak limiter moves its gain. tp_fast_v1 (the default, what plans without this field were rendered with) lets go of a peak within about 2 ms; tp_release_v1 ramps in ahead of a peak at 1 dB/ms and releases at 30 dB/s, like a mastering limiter, without the audio-rate gain flutter that sounds clipped.",
+              "enum": ["tp_fast_v1", "tp_release_v1"]
             }
           },
           "additionalProperties": true
@@ -1039,6 +1087,12 @@
           "minimum": -6,
           "maximum": 0,
           "default": -1
+        },
+        "side_air_db": {
+          "description": "A high shelf above 5 kHz on the side signal only: a wider top end; the mono fold-down (the mid) is unchanged. Plans without it are rendered as before.",
+          "type": "number",
+          "minimum": -6,
+          "maximum": 6
         }
       },
       "additionalProperties": true

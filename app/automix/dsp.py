@@ -163,6 +163,17 @@ def tonal_tilt(x: np.ndarray, sr: int, tilt: dict[str, float]) -> np.ndarray:
     return apply_eq(x, sr, [b for b in bands if abs(b[2]) > 1e-3])
 
 
+def side_shelf(x: np.ndarray, sr: int, gain_db: float, freq: float = 5000.0) -> np.ndarray:
+    """Lift (or cut) only the side signal above ``freq``: a wider top end
+    that leaves the mono fold-down -- the mid -- exactly as it was."""
+    if x.ndim != 2 or x.shape[1] < 2 or abs(gain_db) < 1e-3:
+        return x
+    mid = 0.5 * (x[:, 0] + x[:, 1])
+    side = 0.5 * (x[:, 0] - x[:, 1])
+    side = apply_eq(side[:, None], sr, [("highshelf", freq, gain_db, 0.7)])[:, 0]
+    return np.stack([mid + side, mid - side], axis=1).astype(x.dtype, copy=False)
+
+
 def mono_below(x: np.ndarray, sr: int, hz: float) -> np.ndarray:
     """Collapse content below `hz` to mono (keeps the low end solid)."""
     if hz <= 0:
@@ -338,6 +349,65 @@ def _rolling_max(x: np.ndarray, w: int) -> np.ndarray:
 # ---------------------------------------------------------------- space
 
 
+def make_ir_plate_v2(
+    sr: int,
+    decay_s: float = 1.5,
+    predelay_ms: float = 20.0,
+    high_cut_hz: float = 8000.0,
+    seed: int = 7,
+) -> np.ndarray:
+    """A reverb that behaves more like a real space (law plate_v2).
+
+    make_ir is one noise burst decaying at one rate: every frequency dies
+    together, it starts at full density and it carries the source's low end
+    into the tail -- grainy, flat, and it muddies the mix before it gives a
+    voice any air.  Here:
+      * the tail decays by band: lows (below 500 Hz) at 1.2x the decay time,
+        mids at 1x, highs (above 4 kHz) at 0.55x, as air and surfaces absorb;
+      * eight early reflections between 7 and 45 ms, alternating sides,
+        give the space a size before the tail arrives;
+      * the tail builds up over 15 ms instead of starting at full density;
+      * everything below 200 Hz is taken out of the return, so the reverb can
+        be heard without thickening the low end.
+    Unit energy, like make_ir, so a send amount means the same thing.
+    """
+    rng = np.random.default_rng(seed)
+    long_s = decay_s * 1.2
+    n = max(1, int(long_s * sr))
+    t = np.arange(n) / sr
+    noise = rng.standard_normal((n, 2))
+    spec = np.fft.rfft(noise, axis=0)
+    f = np.fft.rfftfreq(n, 1.0 / sr)[:, None]
+    tail = np.zeros((n, 2))
+    for lo, hi, scale in ((0.0, 500.0, 1.2), (500.0, 4000.0, 1.0), (4000.0, sr / 2.0 + 1, 0.55)):
+        band = np.fft.irfft(spec * ((f >= lo) & (f < hi)), n, axis=0)
+        tail += band * np.exp(-6.9078 * t / max(decay_s * scale, 1e-3))[:, None]
+    tail *= np.minimum(1.0, t / 0.015)[:, None]
+    er = np.zeros((int(0.05 * sr) + 1, 2))
+    for i, ms in enumerate(np.sort(rng.uniform(7.0, 45.0, 8))):
+        er[int(ms * sr / 1000.0), i % 2] += 0.9 * np.exp(-ms / 40.0) * rng.choice((-1.0, 1.0))
+    er_energy = float(np.sqrt(np.sum(er ** 2)))
+    tail_energy = float(np.sqrt(np.sum(tail ** 2)))
+    if er_energy > 0 and tail_energy > 0:
+        er *= 0.35 * tail_energy / er_energy  # reflections ~9 dB under the tail
+    m = max(n, er.shape[0])
+    ir = np.zeros((m, 2))
+    ir[:n] += tail
+    ir[: er.shape[0]] += er
+    ir = apply_eq(ir, sr, [("lowpass", min(high_cut_hz, sr * 0.45), 0.0, 0.707),
+                           ("highpass", 200.0, 0.0, 0.707)])
+    pre = int(max(0.0, predelay_ms) * sr / 1000.0)
+    if pre > 0:
+        ir = np.vstack([np.zeros((pre, 2)), ir])
+    energy = float(np.sqrt(np.sum(ir ** 2)))
+    if energy > 0:
+        ir /= energy
+    return ir
+
+
+REVERB_IR_LAWS = ("noise_v1", "plate_v2")
+
+
 def make_ir(
     sr: int,
     decay_s: float = 1.5,
@@ -381,6 +451,7 @@ def reverb_send(
     decay_s: float = 1.5,
     predelay_ms: float = 20.0,
     high_cut_hz: float = 8000.0,
+    ir_law: str = "noise_v1",
 ) -> np.ndarray:
     """Convolution reverb *send*: returns the wet signal only.
 
@@ -392,7 +463,8 @@ def reverb_send(
         return np.zeros_like(dry)
     if dry.ndim == 1:
         dry = dry[:, None]
-    ir = make_ir(sr, decay_s, predelay_ms, high_cut_hz)
+    maker = make_ir_plate_v2 if ir_law == "plate_v2" else make_ir
+    ir = maker(sr, decay_s, predelay_ms, high_cut_hz)
     wet = np.stack([fft_convolve(dry[:, c], ir[:, c]) for c in range(dry.shape[1])], axis=1)
     return (wet * float(amount)).astype(dry.dtype, copy=False)
 
@@ -494,12 +566,64 @@ def _tp_gain_curve(seg: np.ndarray, sr: int, ceil: float, oversample: int) -> np
     return gain[: seg.shape[0]]
 
 
+#: the release law's recovery and attack slopes (tp_release_v1).  Measured on
+#: an 80 Hz tone with kick hits, 8 dB over the ceiling: the fast law adds harmonics at -47.9 dB (input -58.0); 60 dB/s
+#: -53.5; 30 dB/s with 1 dB/ms attack -57.1, for 0.7 dB less loudness than
+#: 60 dB/s.  Slower still costs loudness and starts to pump.
+LIMITER_RELEASE_DB_PER_S = 30.0
+LIMITER_ATTACK_DB_PER_MS = 1.0
+
+
+def _tp_gain_curve_release(seg: np.ndarray, sr: int, ceil: float, oversample: int) -> np.ndarray:
+    """Like _tp_gain_curve, but shaped like a mastering limiter.
+
+    The fast curve lets go of a peak within ~2 ms, so on a loud mix the gain
+    flutters at audio rate -- distortion, the "clipped" sound.  Here the
+    attenuation needed at each moment (peaks at 4x) is held and released at
+    LIMITER_RELEASE_DB_PER_S, and ramps in ahead of a peak at
+    LIMITER_ATTACK_DB_PER_MS (look-ahead).  Both are running maxima of a
+    sloped line in dB, so it stays vectorised; the attenuation is never less
+    than what the peak needs, so the ceiling holds.
+    """
+    hi = resample_fft(seg, sr, sr * oversample)
+    mag = np.max(np.abs(hi), axis=1)
+    del hi
+    dec = 16
+    usable = (mag.size // dec) * dec
+    if usable == 0:
+        return np.ones(seg.shape[0])
+    mag_d = mag[:usable].reshape(-1, dec).max(axis=1)
+    rate = sr * oversample / dec  # control samples per second
+    need_db = np.maximum(0.0, 20.0 * np.log10(np.maximum(mag_d, 1e-12) / ceil))
+    idx = np.arange(need_db.size, dtype=np.float64)
+    rel = LIMITER_RELEASE_DB_PER_S / rate
+    held = np.maximum.accumulate(need_db + rel * idx) - rel * idx
+    att = LIMITER_ATTACK_DB_PER_MS * 1000.0 / rate
+    rev = held[::-1]
+    ridx = np.arange(rev.size, dtype=np.float64)
+    ramped = (np.maximum.accumulate(rev + att * ridx) - att * ridx)[::-1]
+    smooth = np.maximum(_box_smooth(ramped, max(1, int(rate * 0.0005))), need_db)
+    gain_c = 10.0 ** (-smooth / 20.0)
+    gain_hi = np.repeat(gain_c, dec)
+    if gain_hi.size < mag.size:
+        gain_hi = np.concatenate([gain_hi, np.full(mag.size - gain_hi.size, gain_hi[-1])])
+    groups = (gain_hi.size // oversample) * oversample
+    gain = gain_hi[:groups].reshape(-1, oversample).min(axis=1)
+    if gain.size < seg.shape[0]:
+        gain = np.concatenate([gain, np.full(seg.shape[0] - gain.size, gain[-1])])
+    return gain[: seg.shape[0]]
+
+
+LIMITER_LAWS = ("tp_fast_v1", "tp_release_v1")
+
+
 def true_peak_limit(
     x: np.ndarray,
     sr: int,
     ceiling_db: float = -1.0,
     oversample: int = 4,
     block_s: float = 8.0,
+    law: str = "tp_fast_v1",
 ) -> np.ndarray:
     """Limit so the *reconstructed* waveform stays under the ceiling.
 
@@ -528,14 +652,17 @@ def true_peak_limit(
         return x[:, 0] if squeeze else x
 
     bs = max(1, int(block_s * sr))
-    pad = min(n, int(0.25 * sr))
+    # the release law holds attenuation for longer than the fast one: give
+    # each block enough context that a release never stops at its edge
+    pad = min(n, int((1.0 if law == "tp_release_v1" else 0.25) * sr))
     gain = np.ones(n, dtype=np.float64)
 
     start = 0
     while start < n:
         lo = max(0, start - pad)
         hi = min(n, start + bs + pad)
-        g = _tp_gain_curve(x[lo:hi], sr, ceil, oversample)
+        curve = _tp_gain_curve_release if law == "tp_release_v1" else _tp_gain_curve
+        g = curve(x[lo:hi], sr, ceil, oversample)
         np.minimum(gain[lo:hi], g, out=gain[lo:hi])
         start += bs
 
@@ -1000,6 +1127,7 @@ def parallel_compress(
     threshold_offset_db: float = -10.0,
     attack_ms: float = 2.0,
     release_ms: float = 80.0,
+    level_from: str = "whole",
 ) -> np.ndarray:
     """New-York compression: a crushed copy under the dry signal.
 
@@ -1013,7 +1141,11 @@ def parallel_compress(
     rms = float(np.sqrt(np.mean(x.astype(np.float64) ** 2)))
     if rms <= EPS:
         return x
-    crushed = compress(x, sr, 1.0, threshold_db=lin_to_db(rms) + threshold_offset_db,
+    # "active": the threshold follows the level where the source plays (50 ms
+    # windows within 30 dB of its loudest), so a vocal with long gaps is not
+    # compressed harder than the same phrases sung back to back
+    ref = active_rms(x, sr) if level_from == "active" else rms
+    crushed = compress(x, sr, 1.0, threshold_db=lin_to_db(ref) + threshold_offset_db,
                        ratio_max=ratio, attack_ms=attack_ms, release_ms=release_ms,
                        makeup_mode="none")
     c_rms = float(np.sqrt(np.mean(crushed.astype(np.float64) ** 2)))
@@ -1022,6 +1154,21 @@ def parallel_compress(
     y = x + crushed * (blend * rms / c_rms)
     y_rms = float(np.sqrt(np.mean(y.astype(np.float64) ** 2)))
     return (y * (rms / y_rms)).astype(x.dtype, copy=False)
+
+
+def active_rms(x: np.ndarray, sr: int, window_s: float = 0.05, range_db: float = 30.0) -> float:
+    """RMS over the 50 ms windows within ``range_db`` of the loudest one."""
+    w = max(1, int(window_s * sr))
+    n = (x.shape[0] // w) * w
+    if n == 0:
+        return float(np.sqrt(np.mean(x.astype(np.float64) ** 2)))
+    xx = x[:n].astype(np.float64)
+    p = np.mean(xx.reshape(-1, w, *x.shape[1:]) ** 2, axis=tuple(range(1, xx.ndim + 1)))
+    top = float(np.max(p))
+    if top <= EPS * EPS:
+        return 0.0
+    keep = p >= top * 10.0 ** (-range_db / 10.0)
+    return float(np.sqrt(np.mean(p[keep])))
 
 
 def onset_envelope(x: np.ndarray, sr: int) -> tuple[np.ndarray, float]:

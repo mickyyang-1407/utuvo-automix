@@ -339,6 +339,83 @@ def _vocal_balance(buses: dict, spec: dict, sr: int, warnings: list) -> dict | N
     }
 
 
+def _part_balance(buses: dict, name: str, spec: dict, sr: int, warnings: list) -> dict | None:
+    """Move the drum or the bass bus to where the plan wants it in the band.
+
+    Like the vocal balance, but against the rest of the band without the
+    vocal (the vocal is balanced afterwards against everything): the bus
+    where it plays, against the sum of the other dry buses except vocal and
+    fx.  Clamped and reported like the vocal.
+    """
+    bal = spec.get("balance")
+    part = buses.get(name)
+    if not bal or part is None or not part.any():
+        return None
+    if bal.get("law") != "part_var_v1":
+        raise RenderError(f"unknown {name} balance law {bal.get('law')!r}")
+    rest = None
+    for other, sig in buses.items():
+        if other in (name, "vocal", "fx"):
+            continue
+        rest = sig.copy() if rest is None else rest + sig
+    if rest is None or not rest.any():
+        return None
+    measured, windows = dsp.vocal_to_rest_db(part, rest, sr)
+    del rest
+    if measured is None:
+        return None
+    target = float(bal["target_db"])
+    wanted = target - measured
+    applied = max(-float(bal.get("max_cut_db", 6.0)), min(float(bal.get("max_boost_db", 6.0)), wanted))
+    if abs(applied - wanted) > 0.01:
+        warnings.append(f"{name} balance: wanted {wanted:+.1f} dB to reach {target:+.1f} dB against the band, "
+                        f"limited to {applied:+.1f} dB")
+    buses[name] = part * dsp.db_to_lin(applied)
+    return {"law": "part_var_v1", "measured_db": round(measured, 2), "target_db": round(target, 2),
+            "applied_db": round(applied, 2), "windows": windows}
+
+
+def _balance_band(buses: dict, bus_specs: dict, sr: int, warnings: list, rounds: int = 6) -> dict:
+    """Drum and bass balance together: alternate until neither moves more
+    than 0.1 dB, then report where each one really ended up."""
+    names = [n for n in ("drum", "bass") if (bus_specs.get(n) or {}).get("balance")]
+    first: dict[str, dict] = {}
+    applied = {n: 0.0 for n in names}
+    for _ in range(rounds):
+        moved = 0.0
+        for n in names:
+            quiet: list = []
+            got = _part_balance(buses, n, bus_specs[n], sr, quiet)
+            if got is None:
+                continue
+            first.setdefault(n, got)
+            # the clamp is on the total move, not on each round's step
+            limit = float(bus_specs[n]["balance"].get("max_cut_db", 6.0)), float(bus_specs[n]["balance"].get("max_boost_db", 6.0))
+            total = applied[n] + got["applied_db"]
+            capped = max(-limit[0], min(limit[1], total))
+            if abs(capped - total) > 1e-9:
+                buses[n] = buses[n] * dsp.db_to_lin(capped - total)
+            moved = max(moved, abs(capped - applied[n]))
+            applied[n] = capped
+        if moved < 0.1:
+            break
+    out = {}
+    for n in names:
+        if n not in first:
+            continue
+        rest = sum(sig for other, sig in buses.items() if other not in (n, "vocal", "fx"))
+        final, windows = dsp.vocal_to_rest_db(buses[n], rest, sr) if not np.isscalar(rest) else (None, 0)
+        target = float(bus_specs[n]["balance"]["target_db"])
+        rec = {"law": "part_var_v1", "measured_db": first[n]["measured_db"], "target_db": round(target, 2),
+               "applied_db": round(applied[n], 2),
+               "result_db": None if final is None else round(float(final), 2), "windows": windows}
+        if final is not None and abs(final - target) > 0.5:
+            warnings.append(f"{n} balance: ended at {final:+.1f} dB against the band, target {target:+.1f} "
+                            f"(moved {applied[n]:+.1f} dB, limit reached)")
+        out[n] = rec
+    return out
+
+
 def _parallel(sig: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dict]:
     """The drum bus's New-York compression, with what it did to the shape."""
     if spec.get("law") != "parallel_v1":
@@ -351,6 +428,47 @@ def _parallel(sig: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dict]:
     return out, {"law": "parallel_v1", "blend": float(spec["blend"]),
                  "crest_before_db": round(before, 2),
                  "crest_after_db": round(analyze._envelope_crest_db(out, sr), 2)}
+
+
+def _vocal_character(sig: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dict]:
+    """Density and weight on the vocal bus, after its leveling compressor.
+
+    A crushed parallel copy under the voice (thickness: the quiet syllables
+    come up), a little harmonic saturation (edge), then a tone curve -- body
+    around 220 Hz, presence around 4 kHz, air above 11 kHz.  The vocal
+    balance step that follows sets the level again, so this changes how the
+    voice sounds, not how loud it is.  The receipt measures each change.
+    """
+    if spec.get("law") != "vocal_character_v1":
+        raise RenderError(f"unknown vocal character law {spec.get('law')!r}")
+    if not sig.any():
+        return sig, {"law": "vocal_character_v1", "skipped": "silent vocal bus"}
+    bands = {"body": (150.0, 350.0), "presence": (3000.0, 6000.0), "air": (10000.0, min(16000.0, sr * 0.45))}
+    rms0 = _rms_db(sig)
+    before = {k: _band_db(sig, sr, lo, hi) - rms0 for k, (lo, hi) in bands.items()}
+    crest0 = analyze._envelope_crest_db(sig, sr)
+    out = sig
+    blend = float(spec.get("parallel_blend", 0.0))
+    if blend > 1e-3:
+        out = dsp.parallel_compress(out, sr, blend, ratio=10.0, threshold_offset_db=-12.0,
+                                    attack_ms=3.0, release_ms=90.0, level_from="active")
+    drive = float(spec.get("saturation", 0.0))
+    if drive > 1e-3:
+        # saturation sets its own output level; keep the bus where it was
+        sat = dsp.saturate(out, drive)
+        out = sat * (dsp.db_to_lin(_rms_db(out) - _rms_db(sat)))
+    tone = [("peaking", 220.0, float(spec.get("body_db", 0.0)), 0.9),
+            ("peaking", 4000.0, float(spec.get("presence_db", 0.0)), 0.8),
+            ("highshelf", 11000.0, float(spec.get("air_db", 0.0)), 0.7)]
+    tone = [b for b in tone if abs(b[2]) > 1e-3]
+    if tone:
+        out = dsp.apply_eq(out, sr, tone)
+    rms1 = _rms_db(out)
+    after = {k: _band_db(out, sr, lo, hi) - rms1 for k, (lo, hi) in bands.items()}
+    return out, {"law": "vocal_character_v1", "parallel_blend": blend, "saturation": drive,
+                 "crest_before_db": round(crest0, 2),
+                 "crest_after_db": round(analyze._envelope_crest_db(out, sr), 2),
+                 **{f"{k}_db": round(after[k] - before[k], 2) for k in bands}}
 
 
 def _kick_duck(sig: np.ndarray, key: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dict]:
@@ -422,6 +540,10 @@ def render(
     decay = float(rev.get("decay_s", 1.6))
     predelay = float(rev.get("predelay_ms", rev.get("pre_delay_ms", 20.0)))
     high_cut = float(rev.get("high_cut_hz", 8000.0))
+    # plans written before plate_v2 replay with the reverb they were made with
+    ir_law = str(rev.get("ir_law", "noise_v1"))
+    if ir_law not in dsp.REVERB_IR_LAWS:
+        raise RenderError(f"unknown reverb ir_law {ir_law!r}")
 
     buses: dict[str, np.ndarray] = {}
     reverb_in = np.zeros((n, 2))
@@ -660,7 +782,7 @@ def render(
         if manual_amount == 0.0:
             true_return = np.zeros_like(reverb_in)
         else:
-            true_return = dsp.reverb_send(reverb_in, sr, 1.0, decay, predelay, high_cut)
+            true_return = dsp.reverb_send(reverb_in, sr, 1.0, decay, predelay, high_cut, ir_law=ir_law)
             if manual_amount != 1.0:
                 true_return = true_return * manual_amount
         dry_sum = np.zeros((n, 2))
@@ -705,6 +827,8 @@ def render(
         if name == "bass" and spec.get("duck") and duck_key is not None and duck_key.any():
             sig, moves["kick_duck"] = _kick_duck(sig, duck_key, sr, spec["duck"])
         sig = _apply_comp(sig, sr, spec.get("comp"))
+        if name == "vocal" and spec.get("character"):
+            sig, moves["vocal_character"] = _vocal_character(sig, sr, spec["character"])
         sat = float(spec.get("saturation", 0.0))
         if sat > 1e-3:
             sig = dsp.saturate(sig, sat)
@@ -715,6 +839,10 @@ def render(
     del duck_key
 
     # ---- vocal balance (plans that ask for it; older plans render as before)
+    # the band first (drums, bass), then the vocal against all of it.  Each
+    # one is part of the other's reference, so moving the bass moves where
+    # the drums sit: they are adjusted in turn until both stay put.
+    part_balance = _balance_band(buses, bus_specs, sr, render_warnings)
     vocal_balance = _vocal_balance(buses, bus_specs.get("vocal") or {}, sr, render_warnings)
 
     # The fx bus is part of the original mix path (dry FX plus wet return).
@@ -759,6 +887,9 @@ def render(
     master_bands = _eq_bands(m.get("eq", []))
     if master_bands:
         mix = dsp.apply_eq(mix, sr, master_bands)
+    if m.get("side_air_db"):
+        # a wider top end: only the side moves, the mono fold-down does not
+        mix = dsp.side_shelf(mix, sr, float(m["side_air_db"]))
 
     gain_env = _section_env(secs, n, sr, "gain_db", default=0.0)
     if gain_env is not None and float(np.max(np.abs(gain_env))) > 1e-6:
@@ -795,14 +926,26 @@ def render(
     target = float(m.get("target_lufs", -14.0))
     ceiling = float(m.get("limiter", {}).get("ceiling_db", m.get("true_peak_db", -1.0)))
 
-    mix, loud, master_gain_db = _hit_target(mix, sr, target, ceiling)
+    # plans written before the release law exist replay with the fast one
+    limiter_law = str((m.get("limiter") or {}).get("law", "tp_fast_v1"))
+    if limiter_law not in dsp.LIMITER_LAWS:
+        raise RenderError(f"unknown limiter law {limiter_law!r}")
+    pre_limit = mix
+    mix, loud, master_gain_db = _hit_target(mix, sr, target, ceiling, law=limiter_law)
+    limiting = _limiter_receipt(pre_limit, dsp.db_to_lin(master_gain_db), mix, sr, limiter_law)
+    del pre_limit
 
+    final_lufs = dsp.loudness_lufs(mix, sr)
+    if final_lufs > -70.0 and target - final_lufs > 0.5:
+        render_warnings.append(
+            f"loudness: {final_lufs:.1f} LUFS, {target - final_lufs:.1f} dB under the {target:.1f} target -- "
+            "the limiter stopped before it would squash the mix")
     report = {
         "tracks": per_track,
         "skipped_stems": skipped,
         "warnings": render_warnings,
         "buses": bus_report,
-        "lufs": round(dsp.loudness_lufs(mix, sr), 2),
+        "lufs": round(final_lufs, 2),
         # the native rate the measurements above were taken at, so a
         # downstream diagnostic measures the same audio at the same rate
         "sample_rate": int(sr),
@@ -821,8 +964,12 @@ def render(
     }
     if vocal_balance is not None:
         report["vocal_balance"] = vocal_balance
+    if part_balance:
+        report["part_balance"] = part_balance
     if delay_report is not None:
         moves["vocal_delay"] = delay_report
+    report["limiter"] = limiting
+    report["space"] = {"reverb_ir_law": ir_law, "side_air_db": float(m.get("side_air_db") or 0.0)}
     if moves:
         report["mix_moves"] = moves
     decision = (plan.get("style") or {}).get("source_balance")
@@ -831,8 +978,37 @@ def render(
     return mix, report
 
 
+def _window_power(x: np.ndarray, w: int, n: int) -> np.ndarray:
+    """Mean square per window of ``w`` samples, computed ten seconds at a
+    time so a long session never needs a float64 copy of the whole mix."""
+    out = []
+    step = w * max(1, int(480000 // w))
+    for s in range(0, n, step):
+        seg = x[s:min(n, s + step)].astype(np.float64)
+        out.append(np.mean(seg.reshape(-1, w, x.shape[1]) ** 2, axis=(1, 2)))
+    return np.concatenate(out) if out else np.zeros(0)
+
+
+def _limiter_receipt(before: np.ndarray, gain: float, after: np.ndarray, sr: int, law: str) -> dict:
+    """How hard the limiter worked: gain reduction over 50 ms windows."""
+    w = max(1, int(0.05 * sr))
+    n = (min(before.shape[0], after.shape[0]) // w) * w
+    if n == 0:
+        return {"law": law}
+    pb = _window_power(before, w, n) * gain * gain
+    pa = _window_power(after, w, n)
+    live = pb > 1e-9
+    if not live.any():
+        return {"law": law}
+    gr = 10.0 * np.log10(np.maximum(pa[live], 1e-20) / pb[live])
+    return {"law": law, "gain_reduction_median_db": round(float(np.median(gr)), 2),
+            "gain_reduction_p95_db": round(float(np.percentile(gr, 5)), 2),
+            "time_over_1db": round(float(np.mean(gr < -1.0)), 3)}
+
+
 def _hit_target(
-    mix: np.ndarray, sr: int, target_lufs: float, ceiling_db: float, passes: int = 5
+    mix: np.ndarray, sr: int, target_lufs: float, ceiling_db: float, passes: int = 5,
+    law: str = "tp_fast_v1",
 ) -> tuple[np.ndarray, int]:
     """Gain to the loudness target, with a true-peak limiter in between.
 
@@ -847,15 +1023,26 @@ def _hit_target(
     ref = mix.copy()
     gain_db = 0.0
     used = 0
+    prev = None  # (gain, limited mix, loudness) of the pass before
     for i in range(1, passes + 1):
         used = i
         cur = dsp.loudness_lufs(mix, sr)
         if cur <= -70.0:
             break  # silence: nothing sensible to normalise
-        gain_db += target_lufs - cur
-        mix = dsp.true_peak_limit(ref * dsp.db_to_lin(gain_db), sr, ceiling_db)
-        if abs(dsp.loudness_lufs(mix, sr) - target_lufs) < 0.2:
+        step = target_lufs - cur
+        gain_db += step
+        mix = dsp.true_peak_limit(ref * dsp.db_to_lin(gain_db), sr, ceiling_db, law=law)
+        got = dsp.loudness_lufs(mix, sr)
+        if abs(got - target_lufs) < 0.2:
             break
+        # The release law will not flatten a mix to reach a number: when more
+        # gain stops buying loudness (under a quarter of it comes through),
+        # further passes only squash.  Keep the pass before and stop; the
+        # receipt says how far from the target the mix stayed.
+        if law == "tp_release_v1" and prev is not None and step > 0 and got - prev[2] < 0.25 * step:
+            gain_db, mix = prev[0], prev[1]
+            break
+        prev = (gain_db, mix, got)
 
     # guarantee, not hope: if the target was unreachable without clipping,
     # give up a little loudness rather than the ceiling
@@ -1054,6 +1241,17 @@ def write_report(path: str, plan: dict, report: dict, stems: list) -> None:
         f"| loudness passes | {report['loudness_passes']} |",
         f"| master gain | {report.get('master_gain_db', 0.0):+.2f} dB |",
         *(
+            [f"| space | reverb {sp['reverb_ir_law']}; side air {sp['side_air_db']:+.1f} dB above 5 kHz (mono unchanged) |"]
+            if (sp := report.get("space"))
+            else []
+        ),
+        *(
+            [f"| limiter ({lim['law']}) | median {lim['gain_reduction_median_db']:+.1f} dB, "
+             f"loudest 5% {lim['gain_reduction_p95_db']:+.1f} dB, {100 * lim['time_over_1db']:.0f}% of the time over 1 dB |"]
+            if (lim := report.get("limiter")) and "gain_reduction_median_db" in lim
+            else []
+        ),
+        *(
             [
                 "| vocal against the rest (where it sings, before the master stage) | "
                 f"{vb['measured_db'] + vb['applied_db']:+.1f} dB "
@@ -1063,6 +1261,11 @@ def write_report(path: str, plan: dict, report: dict, stems: list) -> None:
             if (vb := report.get("vocal_balance"))
             else []
         ),
+        *[
+            f"| {name} against the band (where it plays, no vocal) | {pb['result_db']:+.1f} dB "
+            f"(target {pb['target_db']:+.1f}; was {pb['measured_db']:+.1f}, moved {pb['applied_db']:+.1f} dB) |"
+            for name, pb in (report.get("part_balance") or {}).items()
+        ],
         *_move_rows(report.get("mix_moves") or {}),
         "",
         "## Tracks",
@@ -1184,6 +1387,10 @@ def write_report(path: str, plan: dict, report: dict, stems: list) -> None:
 
 def _move_rows(moves: dict) -> list[str]:
     rows = []
+    if (m := moves.get("vocal_character")) and "skipped" not in m:
+        rows.append(f"| vocal weight and edge | envelope crest {m['crest_before_db']:.1f} -> {m['crest_after_db']:.1f} dB; "
+                    f"body {m['body_db']:+.1f}, presence {m['presence_db']:+.1f}, air {m['air_db']:+.1f} dB "
+                    f"(parallel {m['parallel_blend']:.2f}, saturation {m['saturation']:.2f}) |")
     if (m := moves.get("kick_duck")):
         rows.append(f"| bass under the kick (sidechain) | {m['under_hits_db']:+.1f} dB on the hits "
                     f"(up to -{m['depth_db']:.1f}), {100 * m['time_ducked']:.0f}% of the time |")

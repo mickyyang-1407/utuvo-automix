@@ -228,7 +228,7 @@ def test_return_is_pure_convolution_before_fx_bus(sources,tmp_path):
     collected={};mix,report=render.render(sources,p,collect=collected)
     send=sum((collected['stems'][t['id']]*t['sends']['plate'] for t in p['tracks']),np.zeros_like(mix))
     rev=p['reverb']
-    pure=dsp.reverb_send(send,SR,1,rev['decay_s'],rev['pre_delay_ms'],rev['high_cut_hz'])
+    pure=dsp.reverb_send(send,SR,1,rev['decay_s'],rev['pre_delay_ms'],rev['high_cut_hz'],ir_law=rev.get('ir_law','noise_v1'))
     np.testing.assert_allclose(collected['reverb'],pure,atol=1e-12)
     processed=render._set_width(dsp.saturate(render._apply_comp(pure,SR,p['buses']['fx']['comp']),.2),.7)
     assert not np.allclose(collected['reverb'],processed,atol=1e-7)
@@ -259,7 +259,7 @@ def test_dry_fx_track_is_never_duplicated_as_a_return(tmp_path,send):
         pure=np.zeros_like(dry)
     else:
         rev=p['reverb']
-        pure=dsp.reverb_send(dry*send,SR,1,rev['decay_s'],rev['pre_delay_ms'],rev['high_cut_hz'])
+        pure=dsp.reverb_send(dry*send,SR,1,rev['decay_s'],rev['pre_delay_ms'],rev['high_cut_hz'],ir_law=rev.get('ir_law','noise_v1'))
         np.testing.assert_allclose(collected['reverb'],pure,atol=1e-12)
         assert not np.allclose(collected['reverb'],dry+pure,atol=1e-6)
     render.write_stem_export(str(tmp_path),p,collected,report,mix)

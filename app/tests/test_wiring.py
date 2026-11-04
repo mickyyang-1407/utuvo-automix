@@ -288,5 +288,19 @@ def test_the_loudness_target_is_hit(session, base_plan):
     for target in (-18.0, -12.0):
         plan = copy.deepcopy(base_plan)
         plan["buses"]["master"]["target_lufs"] = target
-        audio = _render(session, plan)
-        assert abs(dsp.loudness_lufs(audio, SR) - target) < 0.5
+        audio, rep = render.render(session, plan, {"decay_s": 0.5, "predelay_ms": 0.0})
+        got = dsp.loudness_lufs(audio, SR)
+        if abs(got - target) < 0.5:
+            continue
+        # R114: the release limiter stops before it squashes a mix to reach
+        # the number (these test stems are bare pulses); it must say so, and
+        # it may only fall short, never overshoot
+        assert got < target and target - got < 2.0, (target, got)
+        assert any(w.startswith("loudness:") for w in rep["warnings"]), rep["warnings"]
+
+
+def test_the_fast_limiter_still_hits_the_target_on_old_plans(session, base_plan):
+    plan = copy.deepcopy(base_plan)
+    plan["buses"]["master"]["target_lufs"] = -12.0
+    del plan["buses"]["master"]["limiter"]["law"]
+    assert abs(dsp.loudness_lufs(_render(session, plan), SR) - -12.0) < 0.5

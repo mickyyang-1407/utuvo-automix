@@ -79,11 +79,11 @@ def test_an_unknown_law_is_refused():
 
 
 def test_the_target_is_the_professional_median_plus_the_styles_forwardness():
-    # measured with the renderer's own meter on 11 professional mixes
-    assert planner.VOCAL_VAR_PRO_MEDIAN_DB == -2.7
+    # measured with the renderer's own meter on professional mixes
+    assert planner.VOCAL_VAR_PRO_MEDIAN_DB == -1.9  # R114: 46 MedleyDB mixes (R109: 11, -2.7)
     preset = planner.load_preset("pop_2020s")
-    want = round(-2.7 + float(preset["vocal_forward_db"]), 2)
-    assert want == pytest.approx(-1.2)
+    want = round(-1.9 + float(preset["vocal_forward_db"]) + float(preset["techniques"]["vocal_lift_db"]), 2)
+    assert want == pytest.approx(0.1)  # R114: the pop vocal was heard as a little small
 
 
 @pytest.fixture(scope="module")
@@ -106,7 +106,7 @@ def test_a_plan_with_a_vocal_carries_the_style_target(demo_stems):
     # an unproven session: the recording levels of the vocal do not count
     assert plan["style"]["source_balance"]["origin"] == "default"
     assert "source_db" not in bal
-    assert bal["target_db"] == bal["style_db"] == pytest.approx(-1.2)
+    assert bal["target_db"] == bal["style_db"] == pytest.approx(0.1)
     planner.validate(plan)
 
 

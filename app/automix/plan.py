@@ -32,18 +32,27 @@ MAX_STAGE_DB = 18.0
 
 #: Where the vocal sits against everything else in a finished mix, measured
 #: only where it sings and with the renderer's own meter
-#: (dsp.vocal_to_rest_db): the median of 11 professional MUSDB18 mixes is
-#: -2.7 dB (range -8.2..+0.2).  A style's
-#: vocal_forward_db is added on top.  The renderer measures the real buses
+#: (dsp.vocal_to_rest_db): the median of the 46 MedleyDB mixes of MUSDB18
+#: is -1.9 dB (Pop -1.7, Rock -1.3).  R109 used 11 of them (-2.7), 0.8 dB quieter -- and
+#: the owner heard the vocal as a little small.  A style's vocal_forward_db (and
+#: its techniques.vocal_lift_db) is added on top.  The renderer measures the real buses
 #: after compression and moves the whole vocal bus (lead and backing) to this
 #: target: compressing a sustained vocal twice with half make-up cost it
 #: 3.5-4.5 dB, and a raw session with many accompaniment tracks buries a
 #: single vocal track however its own gain is set.
-VOCAL_VAR_PRO_MEDIAN_DB = -2.7
+VOCAL_VAR_PRO_MEDIAN_DB = -1.9
 VOCAL_BALANCE_LAW = "vocal_var_v1"
 #: the correction is a balance fix, not a rescue: beyond this it is reported
 VOCAL_BALANCE_MAX_BOOST_DB = 9.0
 VOCAL_BALANCE_MAX_CUT_DB = 6.0
+#: The drum and bass buses against the rest of the band (no vocal), where
+#: they play -- the same ruler -- in the 46 MedleyDB mixes of MUSDB18.
+#: A style's drum_forward_db /
+#: bass_forward_db is added on top.
+DRUM_VAR_PRO_MEDIAN_DB: float | None = -5.2   # Pop -5.2, Rock -2.5
+BASS_VAR_PRO_MEDIAN_DB: float | None = -3.9   # Pop -4.6, Rock -3.7
+PART_BALANCE_LAW = "part_var_v1"
+PART_BALANCE_MAX_DB = 6.0
 
 #: Three mixing moves a style can ask for (preset "techniques"); each is a
 #: block in the plan, so a plan written before they existed has none of them
@@ -56,6 +65,9 @@ KICK_DUCK_LAW = "kick_duck_v1"
 KICK_DUCK_MAX_DB = 6.0
 DRUM_PARALLEL_LAW = "parallel_v1"
 VOCAL_DELAY_LAW = "tempo_delay_v1"
+#:   vocal_character_v1 -- weight and edge on the vocal bus: a parallel
+#:                    compressed copy, saturation, body/presence/air EQ
+VOCAL_CHARACTER_LAW = "vocal_character_v1"
 #: beats per delay repeat, by musical division
 DELAY_DIVISIONS = {"1/4": 1.0, "1/8": 0.5, "1/8d": 0.75, "1/4d": 1.5}
 #: a delay is only locked to the tempo when the pulse is clear (comb score)
@@ -86,6 +98,7 @@ RIDE_ROLES = frozenset(
         "synth",
         "pad",
         "strings",
+        "woodwinds",
     }
 )
 
@@ -136,6 +149,7 @@ ROLE_GROUP = {
     "overheads": "drum",
     "room": "drum",
     "drums_full": "drum",
+    "percussion": "drum",
     "bass": "bass",
     "sub_808": "bass",
     "lead_vocal": "vocal",
@@ -148,6 +162,7 @@ ROLE_GROUP = {
     "pad": "music",
     "strings": "music",
     "brass": "music",
+    "woodwinds": "music",
     "fx": "fx",
     "other": "music",
 }
@@ -163,6 +178,7 @@ HPF_HZ = {
     "overheads": 140.0,
     "room": 60.0,
     "drums_full": 30.0,
+    "percussion": 100.0,
     "bass": 28.0,
     "sub_808": 24.0,
     "lead_vocal": 90.0,
@@ -175,17 +191,21 @@ HPF_HZ = {
     "pad": 120.0,
     "strings": 70.0,
     "brass": 65.0,
+    "woodwinds": 60.0,
     "fx": 40.0,
     "other": 50.0,
 }
 
 #: how much of the preset's reverb amount each role receives
 REVERB_WEIGHT = {
-    "lead_vocal": 0.55,
+    # R114: 0.55 -> 0.75 with the plate_v2 return (no low end in it); reported
+    # 2026-11-04: "vocal 都會有一點偏幹"
+    "lead_vocal": 0.75,
     "backing_vocal": 0.85,
     "snare": 0.45,
     "toms": 0.5,
     "drums_full": 0.12,
+    "percussion": 0.35,
     "kick": 0.0,
     "hats": 0.10,
     "cymbals": 0.15,
@@ -202,6 +222,7 @@ REVERB_WEIGHT = {
     "pad": 0.70,
     "strings": 0.70,
     "brass": 0.45,
+    "woodwinds": 0.60,
     "fx": 0.80,
     "other": 0.35,
 }
@@ -220,6 +241,7 @@ PAN = {
     "overheads": 0.0,
     "room": 0.0,
     "drums_full": 0.0,
+    "percussion": 0.25,
     "guitar_electric": -0.30,
     "guitar_acoustic": 0.25,
     "keys": -0.20,
@@ -228,6 +250,7 @@ PAN = {
     "pad": 0.0,
     "strings": -0.12,
     "brass": 0.16,
+    "woodwinds": -0.20,
     "fx": 0.35,
     "backing_vocal": -0.15,
     "other": 0.0,
@@ -578,9 +601,12 @@ HUM_NOTCH_Q = 10.0
 #: "synth_loop_a" asks for nothing (the "l" in "loop" is not a side).  The
 #: token may be written in any case; the id is already normalised.
 _SIDE_TOKENS = {"l": -1, "left": -1, "r": 1, "right": 1}
-#: where a name that commits to a side is placed -- unchanged from the first
-#: version of this rule.
-NAMED_SIDE_PAN = 0.4
+#: where a name that commits to a side is placed.  R114: hard left / hard
+#: right (was 0.4) -- reported 2026-11-04: "只要看到檔案上面有 L 跟 R，就是要 pan
+#: 到極左跟極右".  A track named for a side is half of a stereo pair recorded
+#: on two tracks, so it goes all the way, whatever its role and however many
+#: tracks share it.  Saved plans keep the pan they were written with.
+NAMED_SIDE_PAN = 1.0
 #: how far apart two automatic members of one role group are placed.
 SPREAD_STEP = 0.2
 #: the delimiters a file name may put between words.
@@ -624,19 +650,22 @@ def _spread_duplicate_pans(tracks: list[dict]) -> None:
     for t in tracks:
         by_role.setdefault(t["role"], []).append(t)
 
+    for t in tracks:
+        side, _ambiguous = _side_hint(t.get("id", ""))
+        if side < 0:
+            t["pan"] = -NAMED_SIDE_PAN
+            t.setdefault("evidence", []).append("panned hard left from the file name")
+        elif side > 0:
+            t["pan"] = NAMED_SIDE_PAN
+            t.setdefault("evidence", []).append("panned hard right from the file name")
+
     for role, group in by_role.items():
         if len(group) < 2 or role in centre_roles:
             continue
         automatic = []
         for t in group:
             side, ambiguous = _side_hint(t.get("id", ""))
-            if side < 0:
-                t["pan"] = -NAMED_SIDE_PAN
-                t.setdefault("evidence", []).append("panned left from the file name")
-            elif side > 0:
-                t["pan"] = NAMED_SIDE_PAN
-                t.setdefault("evidence", []).append("panned right from the file name")
-            else:
+            if side == 0:
                 automatic.append(t)
                 if ambiguous:
                     t.setdefault("evidence", []).append(
@@ -883,6 +912,20 @@ def _mix_techniques(preset: dict, intensity: float, stems: list[Stem], tracks: l
         if duck is not None:
             buses["bass"]["duck"] = {"law": KICK_DUCK_LAW, **duck, "depth_db": round(depth, 2),
                                      "attack_ms": 5.0, "release_ms": 120.0}
+
+    # the vocal's weight and edge (parallel density, saturation, body /
+    # presence / air), on the vocal bus whenever there is a vocal
+    vc = dict(tech.get("vocal_character") or {})
+    k = float(intensity)
+    if vc and k > 0.0 and any(t["role"] in analyze.VOCAL_ROLES for t in tracks):
+        buses["vocal"]["character"] = {
+            "law": VOCAL_CHARACTER_LAW,
+            "parallel_blend": round(min(1.0, float(vc.get("parallel_blend", 0.0)) * k), 3),
+            "saturation": round(min(0.5, float(vc.get("saturation", 0.0)) * k), 3),
+            "body_db": round(float(vc.get("body_db", 0.0)) * k, 2),
+            "presence_db": round(float(vc.get("presence_db", 0.0)) * k, 2),
+            "air_db": round(float(vc.get("air_db", 0.0)) * k, 2),
+        }
 
     blend = min(1.0, float(tech.get("drum_parallel", 0.0)) * float(intensity))
     if blend >= 0.05 and has("drum"):
@@ -1667,7 +1710,8 @@ def build_plan(
     buses = {g: _bus(g) for g in ("drum", "bass", "music", "vocal", "fx")}
     if any(t["role"] in VOCAL_ROLES for t in tracks):
         style_db = (VOCAL_VAR_PRO_MEDIAN_DB
-                    + float(preset.get("vocal_forward_db", 0.0)) * float(intensity))
+                    + float(preset.get("vocal_forward_db", 0.0)) * float(intensity)
+                    + float((preset.get("techniques") or {}).get("vocal_lift_db", 0.0)) * float(intensity))
         balance = {
             "law": VOCAL_BALANCE_LAW,
             "target_db": round(style_db, 2),
@@ -1688,6 +1732,17 @@ def build_plan(
                     min(6.0, max(-12.0, k_vocal * source_db + (1.0 - k_vocal) * style_db)), 2
                 )
         buses["vocal"]["balance"] = balance
+    # The band's own balance: drums and bass against the rest of the band,
+    # where they play (R114, reported 2026-11-04: "鼓組和Bass都會太大").  Only for
+    # an unproven session: stems somebody vouched for keep their balance.
+    if decision["origin"] == "default" and float(intensity) > 0.0:
+        tech = dict(preset.get("techniques") or {})
+        for group, median, key in (("drum", DRUM_VAR_PRO_MEDIAN_DB, "drum_forward_db"),
+                                   ("bass", BASS_VAR_PRO_MEDIAN_DB, "bass_forward_db")):
+            if median is not None and any(ROLE_GROUP.get(t["role"], "music") == group for t in tracks):
+                target = median + float(tech.get(key, 0.0)) * float(intensity)
+                buses[group]["balance"] = {"law": PART_BALANCE_LAW, "target_db": round(target, 2),
+                                           "max_boost_db": PART_BALANCE_MAX_DB, "max_cut_db": PART_BALANCE_MAX_DB}
     delay_block = _mix_techniques(preset, intensity, stems, tracks, buses, grouped_ids, warnings)
     # the preset's tonal tilt is a *master* curve: it describes the finished
     # mix's balance, so it is written into the master EQ rather than spread
@@ -1816,7 +1871,13 @@ def build_plan(
         # lookahead and a fast release so the intersample guarantee holds.
         # "lookahead_ms" and "release_ms" used to be written here and read by
         # nothing -- another field that looked like a control and was not.
-        "limiter": {"ceiling_db": round(target_tp, 2)},
+        # R114: the release law (a fast limiter flutters and sounds clipped)
+        "limiter": {"ceiling_db": round(target_tp, 2), "law": "tp_release_v1"},
+        # R114: a wider top end from the side signal only (mono unchanged)
+        **({"side_air_db": round(float((preset.get("techniques") or {}).get("master_side_air_db", 0.0))
+                                * float(intensity), 2)}
+           if float((preset.get("techniques") or {}).get("master_side_air_db", 0.0)) * float(intensity) > 0.05
+           else {}),
         "mono_below_hz": mono_below,
         "width": 1.0,
         "width_target": round(width_target, 3) if reference is not None else None,
@@ -1879,6 +1940,9 @@ def build_plan(
             "pre_delay_ms": round(float(reverb.get("pre_delay_ms", 20.0)), 2),
             "high_cut_hz": round(float(reverb.get("high_cut_hz", 8000.0)), 1),
             "scale": round(reverb_scale, 3),
+            # R114: band-dependent decay, early reflections, no low end in
+            # the return (dsp.make_ir_plate_v2)
+            "ir_law": "plate_v2",
         },
         "warnings": warnings,
     }
@@ -2223,12 +2287,16 @@ def _engine_invariants(plan: dict) -> None:
         if key not in plan:
             raise PlanError(f"plan missing required key {key!r}")
     for name, bus in (plan["buses"] or {}).items():
-        # only the renderer's vocal step reads it; anywhere else it would be
-        # a setting that silently does nothing
-        if name != "vocal" and isinstance(bus, dict) and "balance" in bus:
-            raise PlanError(f"buses.{name}.balance: only the vocal bus has a balance target")
+        # only the renderer's vocal, drum and bass steps read it; anywhere
+        # else it would be a setting that silently does nothing
+        if name not in ("vocal", "drum", "bass") and isinstance(bus, dict) and "balance" in bus:
+            raise PlanError(f"buses.{name}.balance: only the vocal, drum and bass buses have a balance target")
+        if isinstance(bus, dict) and isinstance(bus.get("balance"), dict):
+            wanted = "vocal_var_v1" if name == "vocal" else "part_var_v1"
+            if bus["balance"].get("law") != wanted:
+                raise PlanError(f"buses.{name}.balance: law must be {wanted}")
         # the same for the other bus-only moves: each has one bus that reads it
-        for key, owner in (("duck", "bass"), ("parallel", "drum")):
+        for key, owner in (("duck", "bass"), ("parallel", "drum"), ("character", "vocal")):
             if name != owner and isinstance(bus, dict) and key in bus:
                 raise PlanError(f"buses.{name}.{key}: only the {owner} bus has one")
     if not plan["tracks"]:
@@ -2237,6 +2305,12 @@ def _engine_invariants(plan: dict) -> None:
     # silently does nothing (the renderer only runs buses that have tracks).
     roles = {t.get("id"): t.get("role") for t in plan["tracks"] if isinstance(t, dict)}
     groups = {ROLE_GROUP.get(r, "music") for r in roles.values()}
+    for name in ("drum", "bass"):
+        if ((plan["buses"] or {}).get(name) or {}).get("balance") is not None and name not in groups:
+            raise PlanError(f"buses.{name}.balance: the plan has no {name} track")
+    vocal_bus = (plan["buses"] or {}).get("vocal") or {}
+    if (vocal_bus.get("balance") is not None or vocal_bus.get("character") is not None) and "vocal" not in groups:
+        raise PlanError("buses.vocal: balance / character need a vocal track")
     buses_in = plan["buses"] or {}
     duck = (buses_in.get("bass") or {}).get("duck")
     if duck is not None:

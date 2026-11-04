@@ -510,7 +510,9 @@ def test_the_limiter_block_only_contains_things_that_do_something(session):
     """
     plan = planner.build_plan(session, planner.load_preset("pop_2020s"))
     limiter = plan["buses"]["master"]["limiter"]
-    assert set(limiter) == {"ceiling_db"}, limiter
+    # R114: "law" is read by the renderer (tp_release_v1 vs the fast law)
+    assert set(limiter) == {"ceiling_db", "law"}, limiter
+    assert limiter["law"] == "tp_release_v1"
     assert limiter["ceiling_db"] == plan["buses"]["master"]["true_peak_db"]
 
 def test_compressor_blocks_only_hold_fields_the_renderer_reads(session):
@@ -801,7 +803,7 @@ def test_a_manual_pan_beats_the_left_right_file_name_hints():
     stems = _pan_session("tom_left.wav", "tom_right.wav")
     # with no manual pan the names still decide
     automatic = planner.build_plan(stems, preset)
-    assert _plan_pans(automatic) == {"tom_left": -0.4, "tom_right": 0.4}
+    assert _plan_pans(automatic) == {"tom_left": -1.0, "tom_right": 1.0}  # R114: hard L/R
     # with one, the user's pan wins over the name
     plan = planner.build_plan(stems, preset, pans={"tom_left": 0.7, "tom_right": 0.7})
     assert _plan_pans(plan) == {"tom_left": 0.7, "tom_right": 0.7}

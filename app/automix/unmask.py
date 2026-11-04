@@ -8,7 +8,7 @@ from __future__ import annotations
 import numpy as np
 from .analyze import track_id
 
-TARGET_ROLES = frozenset({'guitar_electric', 'guitar_acoustic', 'keys', 'piano',
+TARGET_ROLES = frozenset({'guitar_electric', 'guitar_acoustic', 'keys', 'piano', 'woodwinds',
                           'synth', 'pad', 'strings', 'other'})
 MODE = 'frozen_vocal_unmask_v1'
 METHOD = 'stereo_mean_square_hann100ms_hop50ms_v1'

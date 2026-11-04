@@ -341,6 +341,8 @@ def test_moves_without_anything_to_act_on_are_refused():
     p = _plan(_session())
     guitar = copy.deepcopy(p)
     guitar["tracks"][0]["role"] = "guitar_electric"          # the kick key becomes a guitar
+    guitar["buses"]["drum"].pop("balance", None)              # (R114: no drum track left to balance)
+    guitar["buses"]["drum"].pop("parallel", None)
     with pytest.raises(planner.PlanError, match="kick or a whole kit"):
         planner.validate(guitar)
     kit = copy.deepcopy(p)

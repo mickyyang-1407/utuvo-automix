@@ -80,17 +80,30 @@ SR = 48000
 #: mid .1486 -> .1579, presence .0219 -> .0249, air .0294 -> .0374.  LUFS
 #: -10.66 -> -10.61, crest 11.41 -> 11.54, width .122 -> .120.  Intended.
 #: Plans without the three blocks render exactly as before.
+#: 2026-11-04 (R114, listening notes on Pop/Metal: vocal a little small, drums and bass
+#: too big, a bit clipped, too dry, image too small): drums and bass are now
+#: balanced against the band (46 MedleyDB mixes: drums -5.2, bass -3.9, pop
+#: -0.5 each) -- the synthetic demo's drums sat at +0.4 dB and come down
+#: 5.0 dB, its sine bass sat at -8.7 and comes up 4.6; the vocal target is
+#: +0.1 (median of 46 mixes -1.9, pop +1.5, lift +0.5); the vocal bus gets
+#: parallel density, saturation and body/presence/air; plate_v2 reverb with
+#: more on the vocal; a release limiter; side air +1.5 dB.  Less drum bus
+#: (where the demo's hats live): air .0374 -> .0127, low .3129 -> .2687;
+#: more bass: low_mid .4399 -> .5128; mid .1579 -> .1739; width .120 ->
+#: .159 (side air, wider reverb); correlation .974 -> .956; LUFS -10.61 ->
+#: -10.56; crest 11.54 -> 11.40.  Intended.  Saved plans render as before
+#: (R25 comparison, replay of R94/R104).
 EXPECTED = {
-    "lufs": -10.61,
-    "crest_db": 11.54,
-    "width": 0.120,
-    "correlation": 0.974,
+    "lufs": -10.56,
+    "crest_db": 11.40,
+    "width": 0.159,
+    "correlation": 0.956,
     "band_energy": {
-        "low": 0.3129,
-        "low_mid": 0.4399,
-        "mid": 0.1579,
-        "presence": 0.0249,
-        "air": 0.0374,
+        "low": 0.2687,
+        "low_mid": 0.5128,
+        "mid": 0.1739,
+        "presence": 0.0228,
+        "air": 0.0127,
     },
 }
 

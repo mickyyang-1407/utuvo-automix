@@ -37,10 +37,28 @@
   .file .badges{flex:0 0 200px;justify-content:flex-end}
   .file .lvl{flex:0 0 72px}
   .file select{flex:0 0 150px}
-  .file .tag{flex:0 0 36px}
+  .file .tag{flex:0 0 64px;white-space:nowrap}
   .file .role{color:var(--accent);font-variant-numeric:tabular-nums}
   .file .name{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .file .badges{display:flex;gap:6px;align-items:center}
+  /* the stripe says which family the stem was sorted into; while the stem is
+     still being analysed a sweep runs across the row, and once its role is
+     known the rows settle in one after another */
+  .file{position:relative;overflow:hidden;border-left:3px solid var(--line)}
+  .file.fam-drums{border-left-color:var(--drums)}
+  .file.fam-bass{border-left-color:var(--bass)}
+  .file.fam-vocals{border-left-color:var(--vocals)}
+  .file.fam-music{border-left-color:var(--music)}
+  .file.fam-fx{border-left-color:var(--fx)}
+  .file.scanning::after{content:"";position:absolute;top:0;bottom:0;left:0;width:40%;pointer-events:none;
+        background:linear-gradient(90deg,transparent,rgba(255,255,255,.07),transparent);
+        animation:scan 1.3s ease-in-out infinite}
+  .file.scanning select{opacity:.35}
+  .file.scanning .tag{color:var(--dim)}
+  .file.arrive{animation:arrive .45s cubic-bezier(.2,.7,.2,1) both}
+  @keyframes scan{from{transform:translateX(-100%)}to{transform:translateX(250%)}}
+  @keyframes arrive{from{opacity:.3;transform:translateX(-8px);border-left-color:var(--line)}to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion:reduce){.file.scanning::after{display:none}.file.arrive{animation:none}}
   .file.muted{opacity:.5}
   .file.muted .name{text-decoration:line-through}
   .file .rm{flex:0 0 auto;font-size:11px;padding:2px 9px;border-radius:7px;background:transparent;
@@ -808,7 +826,11 @@ async function uploadStems(fileList) {
         },
         body: f
       });
+      // the server may rename a clash ("a (2).wav"): what is new is what
+      // was not there before
+      const before = new Set(stems);
       stems = r.stems;
+      stems.forEach(n => { if (!before.has(n)) freshUploads.add(n); });
       renderFiles();
     }
     $("status").textContent = L(`${stems.length} 軌就緒`,
@@ -1428,11 +1450,34 @@ function renderGroups() {
   });
 }
 
+// Stems dropped in on this page: only they settle in when their analysis
+// comes back -- a saved project being opened does not animate.  The start
+// time of each arrival is kept, so a redraw in the middle of it carries on
+// where it was instead of starting over or stopping.
+const freshUploads = new Set();
+const arrivalStart = Object.create(null);  // file name -> ms, page clock
+const ARRIVAL_MS = 450;
+
 function renderFiles() {
   $("files").innerHTML = "";
+  const now = performance.now();
+  const ready = stems.filter(n => freshUploads.has(n) && (roleInfo[n] || {}).metrics && !(n in arrivalStart));
+  // the whole cascade fits in about a second, however many stems there are
+  const step = ready.length ? Math.min(40, 1000 / ready.length) : 0;
+  ready.forEach((n, i) => { arrivalStart[n] = now + i * step; });
   stems.forEach(n => {
     const d = document.createElement("div");
     d.className = "file";
+    const known = roleInfo[n] || {};
+    if (!known.metrics) {
+      d.classList.add("scanning");
+    } else {
+      d.classList.add("fam-" + familyOf(known.role));
+      if (n in arrivalStart && now < arrivalStart[n] + ARRIVAL_MS) {
+        d.classList.add("arrive");
+        d.style.animationDelay = `${Math.round(arrivalStart[n] - now)}ms`;
+      }
+    }
 
     const nm = document.createElement("span");
     nm.className = "name";
@@ -1504,7 +1549,8 @@ function renderFiles() {
 
     const tag = document.createElement("span");
     tag.className = "tag";
-    tag.textContent = info.source === "user" ? L("手動", "manual") : L("自動", "auto");
+    tag.textContent = info.source === "user" ? L("手動", "manual")
+      : !info.metrics ? L("分析中…", "analysing…") : L("自動", "auto");
     d.appendChild(tag);
 
     const gname = document.createElement("input");
@@ -2736,7 +2782,7 @@ const FAMILIES = [
   ["music", () => L("樂器", "Instruments"), "var(--music)"],
   ["fx", () => L("效果與其他", "FX & other"), "var(--fx)"],
 ];
-const ROLE_FAMILY = {kick: "drums", snare: "drums", hats: "drums", toms: "drums", cymbals: "drums", overheads: "drums", room: "drums",
+const ROLE_FAMILY = {kick: "drums", snare: "drums", hats: "drums", toms: "drums", cymbals: "drums", overheads: "drums", room: "drums", percussion: "drums",
   drums_full: "drums", bass: "bass", sub_808: "bass", lead_vocal: "vocals", backing_vocal: "vocals",
   fx: "fx", other: "fx"};
 const familyOf = role => ROLE_FAMILY[role] || (role ? "music" : "fx");

@@ -115,11 +115,11 @@ def test_a_single_member_keeps_its_role_base():
     assert _place(("pad_a.wav", "pad")) == {"pad_a": planner.PAN["pad"]}
 
 
-def test_a_single_member_is_not_moved_by_its_name():
-    """A lone track keeps the role's number even if it says left or right."""
-    assert _place(("guitar_01_L.wav", "guitar_electric")) == {
-        "guitar_01_L": planner.PAN["guitar_electric"]
-    }
+def test_a_single_member_is_moved_by_its_name():
+    """R114: a name that says left or right goes hard there, even alone
+    (requested: "只要看到檔案上面有 L 跟 R，就是要 pan 到極左跟極右")."""
+    assert _place(("guitar_01_L.wav", "guitar_electric")) == {"guitar_01_L": -1.0}
+    assert _place(("OH R.wav", "overheads")) == {"OH_R": 1.0}
 
 
 # ---------------------------------------------- automatic members spread
@@ -161,7 +161,7 @@ def test_one_remaining_automatic_member_is_centred():
         ("guitar_02_R.wav", "guitar_electric"),
         ("guitar_03.wav", "guitar_electric"),
     )
-    assert pans == {"guitar_01_L": -0.4, "guitar_02_R": 0.4, "guitar_03": 0.0}
+    assert pans == {"guitar_01_L": -1.0, "guitar_02_R": 1.0, "guitar_03": 0.0}
 
 
 # ---------------------------------------------------------- reading names
@@ -214,7 +214,7 @@ def test_a_named_side_is_held_and_is_not_fanned():
         ("guitar_02_L.wav", "guitar_electric"),
         ("guitar_03_L.wav", "guitar_electric"),
     )
-    assert set(pans.values()) == {-0.4}
+    assert set(pans.values()) == {-1.0}
 
 
 def test_an_all_right_group_is_held_too():
@@ -222,7 +222,7 @@ def test_an_all_right_group_is_held_too():
         ("guitar_01_R.wav", "guitar_electric"),
         ("guitar_02_R.wav", "guitar_electric"),
     )
-    assert set(pans.values()) == {0.4}
+    assert set(pans.values()) == {1.0}
 
 
 def test_named_members_are_not_part_of_the_automatic_spread():
@@ -232,7 +232,7 @@ def test_named_members_are_not_part_of_the_automatic_spread():
         ("guitar_02.wav", "guitar_electric"),
         ("guitar_03.wav", "guitar_electric"),
     )
-    assert pans == {"guitar_01_L": -0.4, "guitar_02": -0.1, "guitar_03": 0.1}
+    assert pans == {"guitar_01_L": -1.0, "guitar_02": -0.1, "guitar_03": 0.1}
 
 
 def test_centre_roles_are_never_spread():
@@ -317,7 +317,7 @@ def test_a_plan_holds_a_named_side_and_centres_the_rest():
         ("guitar_01_L.wav", "guitar_electric"),
         ("guitar_02.wav", "guitar_electric"),
     )
-    assert _plan_pans(plan) == {"guitar_01_L": -0.4, "guitar_02": 0.0}
+    assert _plan_pans(plan) == {"guitar_01_L": -1.0, "guitar_02": 0.0}
 
 
 def test_a_plan_keeps_its_track_order_and_its_stem_pairing():

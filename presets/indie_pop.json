@@ -44,6 +44,7 @@
     "overheads": -8,
     "room": -11.0,
     "drums_full": -2,
+    "percussion": -7,
     "bass": -3,
     "sub_808": -2,
     "lead_vocal": 0,
@@ -55,6 +56,7 @@
     "synth": -5,
     "pad": -7,
     "strings": -6,
+    "woodwinds": -6,
     "brass": -6,
     "fx": -10,
     "other": -5
@@ -75,6 +77,17 @@
   "techniques": {
     "kick_duck_db": 1.5,
     "drum_parallel": 0.3,
+    "drum_forward_db": -0.5,
+    "bass_forward_db": 0.0,
+    "vocal_lift_db": 0.0,
+    "master_side_air_db": 1.0,
+    "vocal_character": {
+      "parallel_blend": 0.3,
+      "saturation": 0.08,
+      "body_db": 1.5,
+      "presence_db": 1.5,
+      "air_db": 1.5
+    },
     "vocal_delay": {
       "send": 0.1,
       "division": "1/4",

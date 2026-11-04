@@ -409,7 +409,9 @@ def test_ukulele_filename_keeps_explicit_priority_and_word_boundaries():
         ("lead vocal ukulele.wav", "lead_vocal"),
         ("主唱 ukulele.wav", "lead_vocal"),
         ("ukulele bass guitar.wav", "bass"),
-        ("ukulelephant.wav", "keys"),  # existing generic "ep" match
+        # was "keys" through a bare "ep" substring; since R113 "ep" (electric
+        # piano) only counts as a whole word, so a made-up word is nothing
+        ("ukulelephant.wav", None),
         ("preukulele.wav", None),
         ("Luke.wav", None),
     ):

@@ -30,6 +30,7 @@ ROLES = (
     "overheads",
     "room",
     "drums_full",
+    "percussion",
     "bass",
     "sub_808",
     "lead_vocal",
@@ -42,6 +43,7 @@ ROLES = (
     "pad",
     "strings",
     "brass",
+    "woodwinds",
     "fx",
     "other",
 )
@@ -50,8 +52,9 @@ ROLES = (
 #: that "backing vocal" wins over "vocal" and "sub bass" wins over "bass".
 _KEYWORDS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("sub 808", "808", "sub bass", "subbass", "sub"), "sub_808"),
-    (("backing vocal", "backing vox", "vox backing", "vocal backing", "vocals backing", "bv", "harmony", "vox bg", "bgv"), "backing_vocal"),
-    (("lead vocal", "lead vox", "vocal", "vox", "voice", "sing", "vox lead"), "lead_vocal"),
+    (("backing vocal", "backing vox", "backingvox", "background vocal", "background vox", "bkvox",
+      "vox backing", "vocal backing", "vocals backing", "bv", "harmony", "vox bg", "bgv"), "backing_vocal"),
+    (("lead vocal", "lead vox", "ldvoc", "vocal", "vox", "voice", "sing", "vox lead"), "lead_vocal"),
     (("kick", "bd", "bass drum"), "kick"),
     (("snare", "sd", "rim"), "snare"),
     (("hi hat", "hihat", "hat", "hh"), "hats"),
@@ -63,18 +66,28 @@ _KEYWORDS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("rooms", "room", "rm"), "room"),
     (("cymbal", "ride", "crash"), "cymbals"),
     (("drum", "drums", "drumbus", "kit"), "drums_full"),
-    (("guitar ac", "acoustic guitar", "ac gtr", "acgtr", "acoustic", "gtr ac"), "guitar_acoustic"),
-    (("guitar", "gtr", "electric guitar", "eg", "gtr el"), "guitar_electric"),
-    (("piano", "grand", "upright"), "piano"),
-    (("keys", "rhodes", "wurli", "organ", "ep"), "keys"),
-    (("pad", "atmos", "texture"), "pad"),
-    (("string", "violin", "cello", "viola"), "strings"),
-    (("brass", "horn", "trumpet", "sax"), "brass"),
+    (("percussion", "shaker", "tambourine", "conga", "bongo", "cajon", "cowbell"), "percussion"),
+    (("guitar ac", "acoustic guitar", "ac gtr", "acgtr", "agtr", "acoustic", "gtr ac",
+      "banjo", "mandolin", "sitar"), "guitar_acoustic"),
+    (("guitar", "gtr", "electric guitar", "eg", "gtr el", "pedal steel", "lap steel"), "guitar_electric"),
+    # before the piano row: "upright" alone is a piano, an upright bass is not
+    (("upright bass", "double bass"), "bass"),
+    (("electric piano", "epiano"), "keys"),
+    (("piano", "pno", "grand", "upright"), "piano"),
+    (("keys", "rhodes", "wurli", "organ", "ep", "harpsichord", "celesta", "accordion"), "keys"),
+    (("pad", "syn pad", "atmos", "texture"), "pad"),
+    (("string", "violin", "cello", "viola", "harp"), "strings"),
+    # before brass and bass: an English horn is a woodwind, and a bassoon or a
+    # bass clarinet is not a bass
+    (("woodwind", "bassoon", "bsn", "bass clarinet", "bass flute", "clarinet", "flute", "oboe",
+      "piccolo", "recorder", "english horn"), "woodwinds"),
+    (("brass", "horn", "trumpet", "trombone", "tuba", "cornet", "flugel", "euphonium", "sax"), "brass"),
     (("bass", "bassline", "bs"), "bass"),
     # "lead" alone is not here: in a vocal session "Lead" is the lead vocal
     # (see _LEAD_VOCAL_RE); a synth lead names its sound ("square lead")
-    (("synth", "square", "supersaw", "sawtooth", "saw lead", "lead saw", "sawlead", "leadsaw", "arp", "pluck"), "synth"),
-    (("fx", "sfx", "riser", "impact", "noise"), "fx"),
+    (("synth", "syn lead", "square", "supersaw", "sawtooth", "saw lead", "lead saw", "sawlead", "leadsaw",
+      "arp", "pluck"), "synth"),
+    (("fx", "sfx", "sound effect", "effects", "riser", "impact", "noise"), "fx"),
 )
 
 #: Chinese filename keywords -> role.  Both traditional and simplified
@@ -86,6 +99,10 @@ _KEYWORDS_ZH: tuple[tuple[tuple[str, ...], str], ...] = (
     (("主唱", "主旋律", "獨唱", "独唱"), "lead_vocal"),
     (("和聲", "和声", "和音", "合聲", "合声"), "backing_vocal"),
     (("人聲", "人声", "聲部", "声部"), "lead_vocal"),
+    # before 低音 (bass) and 鼓 (drums): a bass clarinet is a woodwind, a
+    # tambourine is percussion
+    (("單簧管", "单簧管", "長笛", "长笛", "雙簧管", "双簧管", "低音管", "巴松", "短笛", "木管"), "woodwinds"),
+    (("打擊樂", "打击乐", "沙鈴", "沙铃", "鈴鼓", "铃鼓", "手鼓", "康加"), "percussion"),
     (("底鼓", "大鼓", "腳鼓", "脚鼓"), "kick"),
     (("軍鼓", "军鼓", "小鼓"), "snare"),
     (("踩鈸", "踩镲", "踩叉"), "hats"),
@@ -110,10 +127,14 @@ _KEYWORDS_ZH: tuple[tuple[tuple[str, ...], str], ...] = (
 )
 
 #: roles that belong to the drum group (they get the drum compression amount)
-DRUM_ROLES = frozenset({"kick", "snare", "hats", "toms", "cymbals", "overheads", "room", "drums_full"})
+DRUM_ROLES = frozenset({"kick", "snare", "hats", "toms", "cymbals", "overheads", "room", "drums_full",
+                        "percussion"})
 #: roles whose keywords only count as whole words ("oh" is not in "john",
 #: "room" is not in "mushroom", "rm" is not in "harmony")
 _WHOLE_WORD = frozenset({"overheads", "room"})
+#: single keywords that are whole words only, whatever their row: "eg" is in
+#: "arpeggio" and "leg", "ep" in "deep" and "step", "harp" in "sharp"
+_WHOLE_WORD_TOKENS = frozenset({"eg", "ep", "harp"})
 VOCAL_ROLES = frozenset({"lead_vocal", "backing_vocal"})
 
 #: The decoder policies a load (and a plan) may name.
@@ -477,7 +498,7 @@ def load_stems(
 #: The lookbehind allows a leading recording number ("3SnTop") and the
 #: lookahead allows a trailing number or separator ("SnTop57", "Sub-Kick_Out")
 #: while refusing a trailing letter.
-_SUBKICK_ALIAS_RE = re.compile(r"(?<![a-z])sub[\s._/-]*kick(?![a-z])")
+_SUBKICK_ALIAS_RE = re.compile(r"(?<![a-z])(?:sub[\s._/-]*kick|(?:kick|k)[\s._/-]*sub)(?![a-z])")
 _SNARE_ALIAS_RE = re.compile(r"(?<![a-z])sn[\s._/-]*(?:top|bottom|btm)(?![a-z])")
 #: Mask the internal "sd" in an explicit Bass DI label, not in BassDinosaur.
 _BASS_DI_ALIAS_RE = re.compile(r"(?<![a-z])bass[\s._/-]*di(?![a-z])")
@@ -511,17 +532,55 @@ _VOCAL_WORDS: tuple[tuple[tuple[str, ...], str], ...] = (
 )
 
 
+#: Session abbreviations, from UTUVO Prep's music naming presets (the names
+#: it reads and the short names it writes).  Too short to test as substrings
+#: ("fl" is in "flat", "oud" in "loud"), so whole words only, and only after
+#: the keyword table found nothing: a word that names something else always
+#: wins ("Kick FL" is a kick).  They are checked before the lone "Lead" rule,
+#: so "Lead Tpt" is a trumpet, not a lead vocal.
+_ABBREVIATIONS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("k in", "k out", "k sub"), "kick"),
+    (("snr", "sn t", "sn b"), "snare"),
+    (("crotch",), "room"),
+    (("perc", "auxperc", "tamb"), "percussion"),
+    (("acgt", "oud"), "guitar_acoustic"),
+    (("syn", "sy"), "synth"),
+    (("strs", "vln", "vla", "vc", "vn", "va", "harp", "hp"), "strings"),
+    (("tpt", "tbn", "tba", "hn", "fhn", "crt", "fgh", "euph"), "brass"),
+    (("fl", "afl", "bfl", "picc", "cl", "bcl", "cbcl", "ob", "eh", "bsn", "bn", "cbn"), "woodwinds"),
+)
+#: Words that mean something else beside another word ("LV Db" is a lead
+#: vocal double, not a double bass; "Song ft. Guest" is a featuring credit;
+#: "12ch-loop" a test file; "double" a sample format): only a name that is
+#: nothing but the word -- with a take number or a side (L/R) -- counts.
+_ALONE_RE = re.compile(r"(?:\d+ )?(db|cb|v|ft|loop|double)(?: (?:\d+|l|r|left|right))*")
+_ALONE_ROLE = {"db": "bass", "cb": "bass", "v": "lead_vocal", "ft": "toms", "loop": "synth",
+               "double": "backing_vocal"}
+#: Vocal abbreviations that only count when no lead word is there: "Lead Dbl"
+#: is the lead vocal's double, a lone "Dbl" a backing double.
+_LATE_VOCAL: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("dbl",), "backing_vocal"),
+    (("voc",), "lead_vocal"),
+)
+
+
+def _abbreviation(word: str, key: str) -> bool:
+    """An abbreviation standing on its own: no plural ("SYS" is not two "SY")."""
+    return re.search(rf"(?<![a-z0-9]){re.escape(word)}(?![a-z])", key) is not None
+
+
 def _whole_word(word: str, key: str) -> bool:
     """``word`` standing on its own in ``key`` (a plural "s" is allowed)."""
     return re.search(rf"(?<![a-z0-9]){re.escape(word)}s?(?![a-z])", key) is not None
 
 
 def _names_an_instrument(key: str) -> bool:
-    """True when a non-vocal instrument word stands on its own in ``key``."""
+    """True when a non-vocal instrument word stands on its own in ``key``
+    ("Harm Tpt" is a trumpet, whatever "Harm" says)."""
     return any(
         role not in VOCAL_ROLES and any(_whole_word(w, key) for w in words)
         for words, role in _KEYWORDS
-    )
+    ) or any(any(_abbreviation(w, key) for w in words) for words, _role in _ABBREVIATIONS)
 
 
 _NWE_TOM_RE = re.compile(
@@ -599,6 +658,9 @@ def _keyword_role(name: str) -> str | None:
                     ):
                         break
                     return role
+            elif w in _WHOLE_WORD_TOKENS:
+                if _whole_word(w, key):
+                    return role
             elif w in key:
                 return role
     # A named position beats no name at all: "T1 Top NWE" is a tom even though
@@ -607,8 +669,18 @@ def _keyword_role(name: str) -> str | None:
     # whole-basename test keeps the position from swallowing anything else.
     if _NWE_TOM_RE.match(whole):
         return "toms"
-    if alias is None and _LEAD_VOCAL_RE.search(key):
-        return "lead_vocal"
+    if alias is None:
+        alone = _ALONE_RE.fullmatch(key)
+        if alone:
+            return _ALONE_ROLE[alone.group(1)]
+        for words, role in _ABBREVIATIONS:
+            if any(_abbreviation(w, key) for w in words):
+                return role
+        if _LEAD_VOCAL_RE.search(key):
+            return "lead_vocal"
+        for words, role in _LATE_VOCAL:
+            if any(_abbreviation(w, key) for w in words):
+                return role
     return alias
 
 
