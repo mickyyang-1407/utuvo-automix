@@ -25,7 +25,7 @@ import wave
 import numpy as np
 
 from . import analyze, dsp, unmask
-from .plan import ROLE_GROUP, SEND_MIN, PlanError, _manual_reverb_amount
+from .plan import BALANCE_METER_LAW, ROLE_GROUP, SEND_MIN, PlanError, _manual_reverb_amount
 
 #: plan vocabulary -> dsp vocabulary
 KIND_MAP = {
@@ -294,7 +294,33 @@ def _apply_comp(x: np.ndarray, sr: int, spec: dict | None) -> np.ndarray:
     )
 
 
-def _vocal_balance(buses: dict, spec: dict, sr: int, warnings: list) -> dict | None:
+#: R116: the balance steps measure through the master EQ -- what the listener
+#: hears, and what the professional medians were measured on.  A style's
+#: low shelf (+2 dB at 120 Hz in Cinematic) otherwise left the kick and the
+#: bass 0.5-0.7 dB above their targets in every song.
+#: Plans without ``meter`` measure the buses as they are, as before.
+#: (BALANCE_METER_LAW comes from plan.py, where the planner writes it.)
+
+
+def _balance_meter(buses: dict, bus_specs: dict, sr: int) -> dict | None:
+    """Copies of the dry buses through the master EQ, when a balance asks
+    for them; the balance steps scale them along with the buses."""
+    wanted = [((bus_specs.get(n) or {}).get("balance") or {}).get("meter") for n in ("vocal", "drum", "bass")]
+    for w in wanted:
+        if w is not None and w != BALANCE_METER_LAW:
+            raise RenderError(f"unknown balance meter {w!r}")
+    if BALANCE_METER_LAW not in wanted:
+        return None
+    bands = _eq_bands((bus_specs.get("master") or {}).get("eq", []))
+    if not bands:
+        # a flat master EQ: the bare buses are what is heard (no copies, and
+        # the receipt does not claim a meter that changed nothing)
+        return None
+    # every dry bus but fx: each one is part of another's reference
+    return {name: dsp.apply_eq(sig, sr, bands) for name, sig in buses.items() if name != "fx"}
+
+
+def _vocal_balance(buses: dict, spec: dict, sr: int, warnings: list, meter: dict | None = None) -> dict | None:
     """Move the whole vocal bus so the vocal sits at the plan's target.
 
     Measured on the processed buses, after every compressor and before the
@@ -308,16 +334,17 @@ def _vocal_balance(buses: dict, spec: dict, sr: int, warnings: list) -> dict | N
         return None
     if bal.get("law") != "vocal_var_v1":
         raise RenderError(f"unknown vocal balance law {bal.get('law')!r}")
+    view = meter if (meter is not None and bal.get("meter") == BALANCE_METER_LAW) else buses
     # dry against dry: the fx bus carries every track's reverb return,
     # the vocal's own included, so it belongs to neither side
     rest = None
-    for name, sig in buses.items():
+    for name, sig in view.items():
         if name in ("vocal", "fx"):
             continue
         rest = sig.copy() if rest is None else rest + sig
     if rest is None or not rest.any():
         return None
-    measured, windows = dsp.vocal_to_rest_db(vocal, rest, sr)
+    measured, windows = dsp.vocal_to_rest_db(view["vocal"], rest, sr)
     del rest
     if measured is None:
         return None
@@ -330,16 +357,22 @@ def _vocal_balance(buses: dict, spec: dict, sr: int, warnings: list) -> dict | N
             f"limited to {applied:+.1f} dB"
         )
     buses["vocal"] = vocal * dsp.db_to_lin(applied)
-    return {
+    if meter is not None and "vocal" in meter:
+        meter["vocal"] = meter["vocal"] * dsp.db_to_lin(applied)
+    out = {
         "law": "vocal_var_v1",
         "measured_db": round(measured, 2),
         "target_db": round(target, 2),
         "applied_db": round(applied, 2),
         "windows": windows,
     }
+    if view is meter:
+        out["meter"] = BALANCE_METER_LAW
+    return out
 
 
-def _part_balance(buses: dict, name: str, spec: dict, sr: int, warnings: list) -> dict | None:
+def _part_balance(buses: dict, name: str, spec: dict, sr: int, warnings: list,
+                  meter: dict | None = None) -> dict | None:
     """Move the drum or the bass bus to where the plan wants it in the band.
 
     Like the vocal balance, but against the rest of the band without the
@@ -353,14 +386,15 @@ def _part_balance(buses: dict, name: str, spec: dict, sr: int, warnings: list) -
         return None
     if bal.get("law") != "part_var_v1":
         raise RenderError(f"unknown {name} balance law {bal.get('law')!r}")
+    view = meter if (meter is not None and bal.get("meter") == BALANCE_METER_LAW) else buses
     rest = None
-    for other, sig in buses.items():
+    for other, sig in view.items():
         if other in (name, "vocal", "fx"):
             continue
         rest = sig.copy() if rest is None else rest + sig
     if rest is None or not rest.any():
         return None
-    measured, windows = dsp.vocal_to_rest_db(part, rest, sr)
+    measured, windows = dsp.vocal_to_rest_db(view[name], rest, sr)
     del rest
     if measured is None:
         return None
@@ -371,21 +405,38 @@ def _part_balance(buses: dict, name: str, spec: dict, sr: int, warnings: list) -
         warnings.append(f"{name} balance: wanted {wanted:+.1f} dB to reach {target:+.1f} dB against the band, "
                         f"limited to {applied:+.1f} dB")
     buses[name] = part * dsp.db_to_lin(applied)
+    if meter is not None and name in meter:
+        meter[name] = meter[name] * dsp.db_to_lin(applied)
     return {"law": "part_var_v1", "measured_db": round(measured, 2), "target_db": round(target, 2),
             "applied_db": round(applied, 2), "windows": windows}
 
 
-def _balance_band(buses: dict, bus_specs: dict, sr: int, warnings: list, rounds: int = 6) -> dict:
+def _balance_band(buses: dict, bus_specs: dict, sr: int, warnings: list, rounds: int = 6,
+                  meter: dict | None = None) -> dict:
     """Drum and bass balance together: alternate until neither moves more
     than 0.1 dB, then report where each one really ended up."""
     names = [n for n in ("drum", "bass") if (bus_specs.get(n) or {}).get("balance")]
+    metered_plan = any((bus_specs[n]["balance"]).get("meter") for n in names)
+    if metered_plan and len(names) == 2:
+        # R116 plans: with nothing else in the band, drums and bass are each
+        # other's only reference and their two targets contradict each other
+        # (the alternation drove both to the cut limit).  Leave them as they are.
+        # "nothing else" by level, not by the first non-zero sample: a part
+        # 40 dB under drums and bass is no reference for either of them
+        band_rms = _rms_db(buses["drum"] + buses["bass"]) if "drum" in buses and "bass" in buses else -240.0
+        others = [sig for other, sig in buses.items()
+                  if other not in ("drum", "bass", "vocal", "fx") and sig.any() and _rms_db(sig) > band_rms - 40.0]
+        if not others:
+            warnings.append("drum/bass balance skipped: drums and bass are the whole band, "
+                            "so each is the other's only reference")
+            return {}
     first: dict[str, dict] = {}
     applied = {n: 0.0 for n in names}
     for _ in range(rounds):
         moved = 0.0
         for n in names:
             quiet: list = []
-            got = _part_balance(buses, n, bus_specs[n], sr, quiet)
+            got = _part_balance(buses, n, bus_specs[n], sr, quiet, meter)
             if got is None:
                 continue
             first.setdefault(n, got)
@@ -395,6 +446,8 @@ def _balance_band(buses: dict, bus_specs: dict, sr: int, warnings: list, rounds:
             capped = max(-limit[0], min(limit[1], total))
             if abs(capped - total) > 1e-9:
                 buses[n] = buses[n] * dsp.db_to_lin(capped - total)
+                if meter is not None and n in meter:
+                    meter[n] = meter[n] * dsp.db_to_lin(capped - total)
             moved = max(moved, abs(capped - applied[n]))
             applied[n] = capped
         if moved < 0.1:
@@ -403,12 +456,16 @@ def _balance_band(buses: dict, bus_specs: dict, sr: int, warnings: list, rounds:
     for n in names:
         if n not in first:
             continue
-        rest = sum(sig for other, sig in buses.items() if other not in (n, "vocal", "fx"))
-        final, windows = dsp.vocal_to_rest_db(buses[n], rest, sr) if not np.isscalar(rest) else (None, 0)
+        metered = meter is not None and bus_specs[n]["balance"].get("meter") == BALANCE_METER_LAW
+        view = meter if metered else buses
+        rest = sum(sig for other, sig in view.items() if other not in (n, "vocal", "fx"))
+        final, windows = dsp.vocal_to_rest_db(view[n], rest, sr) if not np.isscalar(rest) else (None, 0)
         target = float(bus_specs[n]["balance"]["target_db"])
         rec = {"law": "part_var_v1", "measured_db": first[n]["measured_db"], "target_db": round(target, 2),
                "applied_db": round(applied[n], 2),
                "result_db": None if final is None else round(float(final), 2), "windows": windows}
+        if metered:
+            rec["meter"] = BALANCE_METER_LAW
         if final is not None and abs(final - target) > 0.5:
             warnings.append(f"{n} balance: ended at {final:+.1f} dB against the band, target {target:+.1f} "
                             f"(moved {applied[n]:+.1f} dB, limit reached)")
@@ -842,8 +899,10 @@ def render(
     # the band first (drums, bass), then the vocal against all of it.  Each
     # one is part of the other's reference, so moving the bass moves where
     # the drums sit: they are adjusted in turn until both stay put.
-    part_balance = _balance_band(buses, bus_specs, sr, render_warnings)
-    vocal_balance = _vocal_balance(buses, bus_specs.get("vocal") or {}, sr, render_warnings)
+    meter = _balance_meter(buses, bus_specs, sr)
+    part_balance = _balance_band(buses, bus_specs, sr, render_warnings, meter=meter)
+    vocal_balance = _vocal_balance(buses, bus_specs.get("vocal") or {}, sr, render_warnings, meter=meter)
+    del meter
 
     # The fx bus is part of the original mix path (dry FX plus wet return).
     # Its level must not be described as the pure reverb level.
@@ -996,6 +1055,20 @@ def render(
         moves["vocal_delay"] = delay_report
     report["limiter"] = limiting
     report["space"] = {"reverb_ir_law": ir_law, "side_air_db": float(m.get("side_air_db") or 0.0)}
+    timing = (plan.get("reverb") or {}).get("timing")
+    if isinstance(timing, dict) and timing.get("bpm"):
+        # what was rendered (an explicit override would show here), in beats
+        # of the tempo it was locked to
+        beat_s = 60.0 / float(timing["bpm"])
+        report["space"]["timing"] = {"law": timing.get("law"), "bpm": float(timing["bpm"]),
+                                     "decay_s": round(decay, 3), "pre_delay_ms": round(predelay, 2),
+                                     "decay_beats": round(decay / beat_s, 2)}
+        if timing.get("clamped"):
+            report["space"]["timing"]["clamped"] = list(timing["clamped"])
+        if (abs(decay - float(timing.get("decay_s", decay))) > 1e-6
+                or abs(predelay - float(timing.get("pre_delay_ms", predelay))) > 1e-6):
+            # an explicit override: what was rendered is not on the beat grid
+            report["space"]["timing"]["overridden"] = True
     if moves:
         report["mix_moves"] = moves
     decision = (plan.get("style") or {}).get("source_balance")
@@ -1267,7 +1340,13 @@ def write_report(path: str, plan: dict, report: dict, stems: list) -> None:
         f"| loudness passes | {report['loudness_passes']} |",
         f"| master gain | {report.get('master_gain_db', 0.0):+.2f} dB |",
         *(
-            [f"| space | reverb {sp['reverb_ir_law']}; side air {sp['side_air_db']:+.1f} dB above 5 kHz (mono unchanged) |"]
+            [f"| space | reverb {sp['reverb_ir_law']}; side air {sp['side_air_db']:+.1f} dB above 5 kHz (mono unchanged)"
+             + (f"; decay {tm['decay_s']:.2f} s ({tm['decay_beats']:g} beats), pre-delay {tm['pre_delay_ms']:.0f} ms, "
+                + (f"locked to {tm['bpm']:g} BPM ({tm['law']}" if not tm.get("overridden")
+                   else f"set by the caller, not the {tm['bpm']:g} BPM lock ({tm['law']}")
+                + (f"; {', '.join(tm['clamped'])} kept in range" if tm.get("clamped") else "") + ")"
+                if (tm := sp.get("timing")) else "")
+             + " |"]
             if (sp := report.get("space"))
             else []
         ),
@@ -1279,8 +1358,9 @@ def write_report(path: str, plan: dict, report: dict, stems: list) -> None:
         ),
         *(
             [
-                "| vocal against the rest (where it sings, before the master stage) | "
-                f"{vb['measured_db'] + vb['applied_db']:+.1f} dB "
+                ("| vocal against the rest (where it sings, through the master EQ) | "
+                 if vb.get("meter") else "| vocal against the rest (where it sings, before the master stage) | ")
+                + f"{vb['measured_db'] + vb['applied_db']:+.1f} dB "
                 f"(target {vb['target_db']:+.1f}; measured {vb['measured_db']:+.1f}, "
                 f"vocal bus moved {vb['applied_db']:+.1f} dB) |"
             ]
@@ -1288,7 +1368,7 @@ def write_report(path: str, plan: dict, report: dict, stems: list) -> None:
             else []
         ),
         *[
-            f"| {name} against the band (where it plays, no vocal) | {pb['result_db']:+.1f} dB "
+            f"| {name} against the band (where it plays, no vocal{', through the master EQ' if pb.get('meter') else ''}) | {pb['result_db']:+.1f} dB "
             f"(target {pb['target_db']:+.1f}; was {pb['measured_db']:+.1f}, moved {pb['applied_db']:+.1f} dB) |"
             for name, pb in (report.get("part_balance") or {}).items()
         ],

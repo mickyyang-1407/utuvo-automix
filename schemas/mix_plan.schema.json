@@ -15,7 +15,8 @@
     "reverb": {
       "properties": {
         "manual_amount": {"type": "number", "minimum": 0, "maximum": 1},
-        "ir_law": {"description": "The reverb's impulse response. noise_v1 (the default, what plans without this field were rendered with) is one noise burst decaying at one rate; plate_v2 decays by band, has early reflections, builds up over 15 ms and carries nothing below 200 Hz.", "enum": ["noise_v1", "plate_v2"]}
+        "ir_law": {"description": "The reverb's impulse response. noise_v1 (the default, what plans without this field were rendered with) is one noise burst decaying at one rate; plate_v2 decays by band, has early reflections, builds up over 15 ms and carries nothing below 200 Hz.", "enum": ["noise_v1", "plate_v2"]},
+        "timing": {"description": "Receipt of tempo_space_v1: decay_s and pre_delay_ms were locked to the song's tempo (the beat times the power of two nearest the style's own value, within a factor sqrt(2)). The renderer reads decay_s / pre_delay_ms, not this block.", "type": "object", "required": ["law", "bpm", "decay_s", "pre_delay_ms"], "properties": {"law": {"enum": ["tempo_space_v1"]}, "bpm": {"type": "number", "minimum": 20, "maximum": 400}, "style_decay_s": {"type": "number"}, "style_pre_delay_ms": {"type": "number"}, "decay_s": {"type": "number", "minimum": 0.3, "maximum": 8}, "pre_delay_ms": {"type": "number", "minimum": 5, "maximum": 150}, "decay_beats": {"type": "number"}, "pre_delay_beats": {"type": "number"}, "clamped": {"description": "Which values the safety range (0.3-8 s, 5-150 ms) moved off the beat grid.", "type": "array", "items": {"enum": ["decay_s", "pre_delay_ms"]}, "minItems": 1, "uniqueItems": true}}, "additionalProperties": false}
       },
       "additionalProperties": true
     },
@@ -891,7 +892,7 @@
               "maximum": 18
             },
             "max_cut_db": {
-              "description": "Largest cut. When absent: 6 dB for both laws.",
+              "description": "Largest cut. When absent: 6 dB for both laws (planners always write it; part_var_v1 plans from R116 on write 12 dB).",
               "type": "number",
               "minimum": 0,
               "maximum": 18
@@ -903,6 +904,10 @@
             "source_db": {
               "description": "The vocal against the rest in the stems as delivered; only recorded when their balance was vouched for.",
               "type": "number"
+            },
+            "meter": {
+              "description": "How the balance is measured. master_eq_v1: through the master EQ (what the listener hears). When absent: the buses as they are, as plans before R116 were rendered.",
+              "enum": ["master_eq_v1"]
             }
           },
           "additionalProperties": false

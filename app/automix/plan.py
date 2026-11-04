@@ -52,6 +52,17 @@ DRUM_VAR_PRO_MEDIAN_DB: float | None = -5.2   # Pop -5.2, Rock -2.5
 BASS_VAR_PRO_MEDIAN_DB: float | None = -3.9   # Pop -4.6, Rock -3.7
 PART_BALANCE_LAW = "part_var_v1"
 PART_BALANCE_MAX_DB = 6.0
+#: R116: the largest cut.  At 6 dB both buses ran out in half of the 41
+#: MedleyDB songs with Pop 2020s (drums up to 9.5 dB, bass up to 5.1 dB over
+#: their target, measured on the MedleyDB corpus): the planner's per-track levels start the
+#: band louder than a finished mix, and when drums and bass are both cut each
+#: one's reference shrinks with the other.  The limits are written into every
+#: plan, so plans written with 6 dB replay as they were.
+PART_BALANCE_MAX_CUT_DB = 12.0
+#: R116: every balance (vocal, drums, bass) is measured through the master EQ,
+#: what the listener hears and what the professional medians were measured
+#: on (render.BALANCE_METER_LAW); plans without it measured the bare buses
+BALANCE_METER_LAW = "master_eq_v1"
 
 #: Three mixing moves a style can ask for (preset "techniques"); each is a
 #: block in the plan, so a plan written before they existed has none of them
@@ -67,6 +78,19 @@ VOCAL_DELAY_LAW = "tempo_delay_v1"
 #:   vocal_character_v1 -- weight and edge on the vocal bus: a parallel
 #:                    compressed copy, saturation, body/presence/air EQ
 VOCAL_CHARACTER_LAW = "vocal_character_v1"
+#:   tempo_space_v1 -- the reverb's pre-delay and decay locked to the song's
+#:                    tempo (R116): each is the beat times the power of two
+#:                    that comes nearest the style's own value (so never more than a
+#:                    factor sqrt(2) away from it, unless a safety clamp --
+#:                    0.3-8 s, 5-150 ms -- applies, which the receipt then
+#:                    says: "clamped"), the published rule being a
+#:                    tail that has died by the next backbeat and a pre-delay
+#:                    that is a note value.  Only when the tempo is clear;
+#:                    the plan's decay_s / pre_delay_ms are what the renderer
+#:                    uses, so plans written before this replay as they were.
+REVERB_TIMING_LAW = "tempo_space_v1"
+REVERB_TIMING_PRE_MS = (5.0, 150.0)
+REVERB_TIMING_DECAY_S = (0.3, 8.0)
 #: beats per delay repeat, by musical division
 DELAY_DIVISIONS = {"1/4": 1.0, "1/8": 0.5, "1/8d": 0.75, "1/4d": 1.5}
 #: a delay is only locked to the tempo when the pulse is clear (comb score)
@@ -886,8 +910,37 @@ def _tempo_for_delay(stems: list[Stem], tracks: list[dict]) -> dict | None:
     return None
 
 
+def _snap_to_beat(aim: float, beat: float) -> float:
+    """The beat times the power of two nearest ``aim`` (log scale)."""
+    return beat * 2.0 ** round(math.log2(aim / beat))
+
+
+def _reverb_timing(reverb: dict, tempo: dict | None) -> dict | None:
+    """The style's decay and pre-delay locked to the tempo, or None."""
+    if tempo is None or not tempo.get("bpm"):
+        return None
+    beat_s = 60.0 / float(tempo["bpm"])
+    aim_decay = float(reverb.get("decay_s", 1.6))
+    aim_pre = float(reverb.get("pre_delay_ms", 20.0))
+    if aim_decay <= 0.0 or aim_pre <= 0.0:
+        return None
+    snapped_decay = _snap_to_beat(aim_decay, beat_s)
+    snapped_pre = _snap_to_beat(aim_pre, beat_s * 1000.0)
+    decay = min(REVERB_TIMING_DECAY_S[1], max(REVERB_TIMING_DECAY_S[0], snapped_decay))
+    pre = min(REVERB_TIMING_PRE_MS[1], max(REVERB_TIMING_PRE_MS[0], snapped_pre))
+    out = {"law": REVERB_TIMING_LAW, "bpm": round(float(tempo["bpm"]), 2),
+           "style_decay_s": round(aim_decay, 3), "style_pre_delay_ms": round(aim_pre, 2),
+           "decay_s": round(decay, 3), "pre_delay_ms": round(pre, 2),
+           "decay_beats": round(decay / beat_s, 4), "pre_delay_beats": round(pre / 1000.0 / beat_s, 5)}
+    clamped = [name for name, a, b in (("decay_s", decay, snapped_decay), ("pre_delay_ms", pre, snapped_pre)) if a != b]
+    if clamped:
+        # the safety range moved it off the beat grid: say so
+        out["clamped"] = clamped
+    return out
+
+
 def _mix_techniques(preset: dict, intensity: float, stems: list[Stem], tracks: list[dict],
-                    buses: dict, grouped_ids: set, warnings: list) -> dict | None:
+                    buses: dict, grouped_ids: set, warnings: list, tempo_of=None) -> dict | None:
     """Write the style's sidechain, parallel and delay moves into the plan.
 
     Bus blocks are added in place; the delay block is returned (it belongs at
@@ -940,7 +993,7 @@ def _mix_techniques(preset: dict, intensity: float, stems: list[Stem], tracks: l
     feedback = float(spec.get("feedback", 0.0))
     tempo = None
     if division in DELAY_DIVISIONS:
-        tempo = _tempo_for_delay(stems, tracks)
+        tempo = tempo_of() if tempo_of is not None else _tempo_for_delay(stems, tracks)
         if tempo is None:
             warnings.append(f"vocal delay: no clear tempo, so a {SLAP_MS:.0f} ms slapback instead of a {division} delay")
     if tempo is not None:
@@ -1717,6 +1770,7 @@ def build_plan(
             "max_boost_db": VOCAL_BALANCE_MAX_BOOST_DB,
             "max_cut_db": VOCAL_BALANCE_MAX_CUT_DB,
             "style_db": round(style_db, 2),
+            "meter": BALANCE_METER_LAW,
         }
         # The source's own vocal balance only counts when somebody vouched
         # for it (proven stems, a declared profile, an explicit amount).  An
@@ -1741,8 +1795,20 @@ def build_plan(
             if median is not None and any(ROLE_GROUP.get(t["role"], "music") == group for t in tracks):
                 target = median + float(tech.get(key, 0.0)) * float(intensity)
                 buses[group]["balance"] = {"law": PART_BALANCE_LAW, "target_db": round(target, 2),
-                                           "max_boost_db": PART_BALANCE_MAX_DB, "max_cut_db": PART_BALANCE_MAX_DB}
-    delay_block = _mix_techniques(preset, intensity, stems, tracks, buses, grouped_ids, warnings)
+                                           "max_boost_db": PART_BALANCE_MAX_DB, "max_cut_db": PART_BALANCE_MAX_CUT_DB,
+                                           "meter": BALANCE_METER_LAW}
+    # one tempo estimate for the delay and the reverb timing
+    tempo_memo: dict = {}
+
+    def tempo_of() -> dict | None:
+        if "tempo" not in tempo_memo:
+            tempo_memo["tempo"] = _tempo_for_delay(stems, tracks)
+        return tempo_memo["tempo"]
+
+    delay_block = _mix_techniques(preset, intensity, stems, tracks, buses, grouped_ids, warnings, tempo_of)
+    reverb_timing = None
+    if (preset.get("techniques") or {}).get("reverb_tempo_lock"):
+        reverb_timing = _reverb_timing(reverb, tempo_of())
     # the preset's tonal tilt is a *master* curve: it describes the finished
     # mix's balance, so it is written into the master EQ rather than spread
     # across the tracks (which would apply it several times over).
@@ -1949,6 +2015,11 @@ def build_plan(
     }
     if delay_block is not None:
         plan["delay"] = delay_block
+    if reverb_timing is not None:
+        # the renderer reads decay_s / pre_delay_ms; timing is the receipt
+        plan["reverb"]["decay_s"] = reverb_timing["decay_s"]
+        plan["reverb"]["pre_delay_ms"] = reverb_timing["pre_delay_ms"]
+        plan["reverb"]["timing"] = reverb_timing
     if decode_policy is not None:
         # Only recorded when it is known.  A plan without it was built from
         # material whose origin nobody can vouch for, and it is replayed the

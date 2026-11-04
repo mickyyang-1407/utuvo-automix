@@ -1476,7 +1476,10 @@ def estimate_memory_mb(stems: "list[Stem]") -> float:
     n = max((s.audio.shape[0] for s in stems), default=0)
     ch = 2
     bytes_per_stem = n * ch * 4  # float32
-    return (len(stems) * bytes_per_stem * 4.2) / 1e6
+    # R116: the balance meter holds a master-EQ'd copy of the four dry buses
+    # (float64) and filters one at a time (a complex128 spectrum)
+    meter = n * ch * (4 * 8 + 16)
+    return (len(stems) * bytes_per_stem * 4.2 + meter) / 1e6
 
 
 def check_memory(stems: "list[Stem]", budget_mb: float | None = None) -> None:

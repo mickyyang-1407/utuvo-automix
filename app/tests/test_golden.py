@@ -93,17 +93,27 @@ SR = 48000
 #: .159 (side air, wider reverb); correlation .974 -> .956; LUFS -10.61 ->
 #: -10.56; crest 11.54 -> 11.40.  Intended.  Saved plans render as before
 #: (R25 comparison, replay of R94/R104).
+#: 2026-11-04 (R116): the balance steps measure through the master EQ (what
+#: the listener hears; pop's +1.5 dB low shelf had left kick and bass above
+#: their targets), the drum/bass cut may go to 12 dB (the demo's drums need
+#: 6.19, the old limit stopped at 6), the reverb is locked to the demo's
+#: 100 BPM (decay 1.6 -> 1.2 s = 2 beats, pre-delay 28 -> 37.5 ms = 1/16
+#: beat, a 1/64 note) and the drum parallel blend is halved (.35 -> .175).  Less kick and
+#: bass as heard: low .2687 -> .2470, low_mid .5128 -> .5353, mid .1739 ->
+#: .1757, presence .0228 -> .0249, air .0127 -> .0099; width .159 -> .178;
+#: correlation .956 -> .940; LUFS -10.56 -> -10.54; crest 11.40.  Intended.
+#: Saved plans render as before (R25 comparison, replay of R94/R104/R115).
 EXPECTED = {
-    "lufs": -10.56,
+    "lufs": -10.54,
     "crest_db": 11.40,
-    "width": 0.159,
-    "correlation": 0.956,
+    "width": 0.178,
+    "correlation": 0.940,
     "band_energy": {
-        "low": 0.2687,
-        "low_mid": 0.5128,
-        "mid": 0.1739,
-        "presence": 0.0228,
-        "air": 0.0127,
+        "low": 0.2470,
+        "low_mid": 0.5353,
+        "mid": 0.1757,
+        "presence": 0.0249,
+        "air": 0.0099,
     },
 }
 

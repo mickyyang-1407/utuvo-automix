@@ -189,6 +189,13 @@ def _without_ratio_law(plan: dict) -> dict:
         (master.get("limiter") or {}).pop(key, None)
     master.pop("side_air_db", None)
     (plan.get("reverb") or {}).pop("ir_law", None)
+    # R116: a tempo-locked reverb goes back to the style's own numbers, and
+    # the balance meter (popped with the balance blocks above) is new too
+    rev = plan.get("reverb") or {}
+    timing = rev.pop("timing", None)
+    if timing:
+        rev["decay_s"] = timing["style_decay_s"]
+        rev["pre_delay_ms"] = timing["style_pre_delay_ms"]
     # R114 also raised the lead vocal's reverb weight 0.55 -> 0.75 (a planner
     # number, not a renderer change): undo it for the comparison
     for track in plan.get("tracks", []):

@@ -86,6 +86,7 @@
       "send": 0.05,
       "division": "slap",
       "feedback": 0.0
-    }
+    },
+    "reverb_tempo_lock": true
   }
 }

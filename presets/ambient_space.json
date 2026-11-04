@@ -92,6 +92,7 @@
       "send": 0.18,
       "division": "1/4",
       "feedback": 0.45
-    }
+    },
+    "reverb_tempo_lock": true
   }
 }

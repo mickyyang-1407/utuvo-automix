@@ -199,6 +199,23 @@ def _note_crest(plan: dict, preset: dict, report: dict) -> None:
         )
 
 
+def _timed_reverb(reverb_kwargs: dict, caller_keys: set, plan: dict) -> dict:
+    """A tempo-locked plan (reverb.timing) renders with its own decay and
+    pre-delay -- the numbers a replay of the saved plan uses -- unless the
+    caller asked for others.  Without timing nothing changes."""
+    rev = plan.get("reverb") or {}
+    if not isinstance(rev.get("timing"), dict):
+        return reverb_kwargs
+    out = dict(reverb_kwargs)
+    # exactly what the renderer reads from a plan when no kwargs are given
+    # (render.render), so the first render and a later replay agree
+    if "decay_s" not in caller_keys:
+        out["decay_s"] = float(rev.get("decay_s", 1.6))
+    if "predelay_ms" not in caller_keys:
+        out["predelay_ms"] = float(rev.get("predelay_ms", rev.get("pre_delay_ms", 20.0)))
+    return out
+
+
 def mix(
     stems: list,
     preset: dict,
@@ -233,6 +250,7 @@ def mix(
     # `pre_delay_ms` was a knob that did nothing.  Note the name change: the
     # preset says pre_delay_ms, the IR builder says predelay_ms.
     rev_style = preset.get("reverb") or {}
+    caller_reverb = set(reverb_kwargs)
     reverb_kwargs.setdefault("decay_s", float(rev_style.get("decay_s", 1.6)))
     reverb_kwargs.setdefault("predelay_ms", float(rev_style.get("pre_delay_ms", 20.0)))
 
@@ -261,6 +279,7 @@ def mix(
     # not satisfy the schema must not produce audio.  This is the first
     # reference pass -- the second one is checked the same way below.
     planner.validate(plan)
+    reverb_kwargs = _timed_reverb(reverb_kwargs, caller_reverb, plan)
     audio, report = render.render(stems, plan, reverb_kwargs, collect=collect)
     _note_crest(plan, preset, report)
     _note_balance(plan, report, plan.setdefault("warnings", []))
@@ -301,6 +320,7 @@ def mix(
     # The second reference pass is checked the same way: a plan that does not
     # satisfy the schema must not produce audio either.
     planner.validate(plan)
+    reverb_kwargs = _timed_reverb(reverb_kwargs, caller_reverb, plan)
     audio, report = render.render(stems, plan, reverb_kwargs, collect=collect)
     _note_crest(plan, preset, report)
     _note_balance(plan, report, plan.setdefault("warnings", []))

@@ -149,7 +149,8 @@ def test_style_moves_are_written_into_the_plan():
     p = _plan(stems)
     duck = p["buses"]["bass"]["duck"]
     assert duck["law"] == "kick_duck_v1" and duck["key_ids"] == ["Kick"] and duck["depth_db"] == 2.0
-    assert p["buses"]["drum"]["parallel"]["blend"] == .35
+    # R116: half of R111's 0.35, the published "crushed copy about 15 dB under the kit"
+    assert p["buses"]["drum"]["parallel"]["blend"] == .175
     delay = p["delay"]
     assert delay["division"] == "1/4" and delay["tempo"]["bpm"] == pytest.approx(110, rel=.01)
     assert delay["time_ms"] == pytest.approx(60000 / delay["tempo"]["bpm"], abs=.01)
