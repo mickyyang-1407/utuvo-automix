@@ -46,9 +46,8 @@ VOCAL_BALANCE_LAW = "vocal_var_v1"
 VOCAL_BALANCE_MAX_BOOST_DB = 9.0
 VOCAL_BALANCE_MAX_CUT_DB = 6.0
 #: The drum and bass buses against the rest of the band (no vocal), where
-#: they play -- the same ruler -- in the 46 MedleyDB mixes of MUSDB18.
-#: A style's drum_forward_db /
-#: bass_forward_db is added on top.
+#: they play -- the same ruler -- in the 46 MedleyDB mixes of MUSDB18.  A style's
+#: drum_forward_db / bass_forward_db is added on top.
 DRUM_VAR_PRO_MEDIAN_DB: float | None = -5.2   # Pop -5.2, Rock -2.5
 BASS_VAR_PRO_MEDIAN_DB: float | None = -3.9   # Pop -4.6, Rock -3.7
 PART_BALANCE_LAW = "part_var_v1"
@@ -1872,7 +1871,9 @@ def build_plan(
         # "lookahead_ms" and "release_ms" used to be written here and read by
         # nothing -- another field that looked like a control and was not.
         # R114: the release law (a fast limiter flutters and sounds clipped)
-        "limiter": {"ceiling_db": round(target_tp, 2), "law": "tp_release_v1"},
+        # R115: never more than 3 dB off the loudest 5% to reach the number
+        "limiter": {"ceiling_db": round(target_tp, 2), "law": "tp_release_v1",
+                    "max_gr_p95_db": 3.0, "max_backoff_db": 1.5},
         # R114: a wider top end from the side signal only (mono unchanged)
         **({"side_air_db": round(float((preset.get("techniques") or {}).get("master_side_air_db", 0.0))
                                 * float(intensity), 2)}

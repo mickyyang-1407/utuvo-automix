@@ -511,7 +511,8 @@ def test_the_limiter_block_only_contains_things_that_do_something(session):
     plan = planner.build_plan(session, planner.load_preset("pop_2020s"))
     limiter = plan["buses"]["master"]["limiter"]
     # R114: "law" is read by the renderer (tp_release_v1 vs the fast law)
-    assert set(limiter) == {"ceiling_db", "law"}, limiter
+    # R115: the squash guard's two numbers are read by the renderer too
+    assert set(limiter) == {"ceiling_db", "law", "max_gr_p95_db", "max_backoff_db"}, limiter
     assert limiter["law"] == "tp_release_v1"
     assert limiter["ceiling_db"] == plan["buses"]["master"]["true_peak_db"]
 

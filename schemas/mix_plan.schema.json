@@ -1070,6 +1070,17 @@
               "maximum": 500,
               "default": 80
             },
+            "max_gr_p95_db": {
+              "description": "Squash guard: when the loudest 5% of the song (50 ms windows) loses more than this to the limiter, the master gives back loudness instead (at most max_backoff_db). Plans without it are rendered as before.",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 20
+            },
+            "max_backoff_db": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 6
+            },
             "law": {
               "description": "How the true-peak limiter moves its gain. tp_fast_v1 (the default, what plans without this field were rendered with) lets go of a peak within about 2 ms; tp_release_v1 ramps in ahead of a peak at 1 dB/ms and releases at 30 dB/s, like a mastering limiter, without the audio-rate gain flutter that sounds clipped.",
               "enum": ["tp_fast_v1", "tp_release_v1"]

@@ -185,7 +185,8 @@ def _without_ratio_law(plan: dict) -> dict:
     for part in ("drum", "bass"):
         plan.get("buses", {}).get(part, {}).pop("balance", None)
     master = plan.get("buses", {}).get("master", {})
-    (master.get("limiter") or {}).pop("law", None)
+    for key in ("law", "max_gr_p95_db", "max_backoff_db"):  # R114 / R115 limiter fields
+        (master.get("limiter") or {}).pop(key, None)
     master.pop("side_air_db", None)
     (plan.get("reverb") or {}).pop("ir_law", None)
     # R114 also raised the lead vocal's reverb weight 0.55 -> 0.75 (a planner

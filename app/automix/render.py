@@ -933,10 +933,36 @@ def render(
     pre_limit = mix
     mix, loud, master_gain_db = _hit_target(mix, sr, target, ceiling, law=limiter_law)
     limiting = _limiter_receipt(pre_limit, dsp.db_to_lin(master_gain_db), mix, sr, limiter_law)
+    # R115: the squash guard.  A dense song can hit the loudness target only
+    # by limiting its loudest moments hard; when the loudest 5% loses more
+    # than max_gr_p95_db, give back some loudness (at most max_backoff_db)
+    # instead.  Only plans that carry the field: older ones render as before.
+    guard = (m.get("limiter") or {}).get("max_gr_p95_db")
+    backed_off = 0.0
+    if guard is not None and limiting.get("gain_reduction_p95_db") is not None:
+        limit_back = float((m.get("limiter") or {}).get("max_backoff_db", 1.5))
+        for _ in range(4):
+            over = -float(guard) - float(limiting["gain_reduction_p95_db"])
+            if over <= 0.05 or backed_off >= limit_back - 1e-9:
+                break
+            backed_off = min(limit_back, backed_off + max(0.25, 0.7 * over))
+            gain = master_gain_db - backed_off
+            mix = dsp.true_peak_limit(pre_limit * dsp.db_to_lin(gain), sr, ceiling, law=limiter_law)
+            limiting = _limiter_receipt(pre_limit, dsp.db_to_lin(gain), mix, sr, limiter_law)
+        if backed_off > 0:
+            tp = dsp.true_peak_db(mix, sr)
+            if tp > ceiling:  # the same guarantee _hit_target gives
+                mix = mix * dsp.db_to_lin(ceiling - tp)
+                backed_off += tp - ceiling
+            master_gain_db -= backed_off
+            limiting["backed_off_db"] = round(backed_off, 2)
+            render_warnings.append(
+                f"loudness: {backed_off:.1f} dB quieter than the target so the limiter does not squash the "
+                f"loudest moments (loudest 5% now {limiting['gain_reduction_p95_db']:+.1f} dB)")
     del pre_limit
 
     final_lufs = dsp.loudness_lufs(mix, sr)
-    if final_lufs > -70.0 and target - final_lufs > 0.5:
+    if final_lufs > -70.0 and target - final_lufs > 0.5 + backed_off:
         render_warnings.append(
             f"loudness: {final_lufs:.1f} LUFS, {target - final_lufs:.1f} dB under the {target:.1f} target -- "
             "the limiter stopped before it would squash the mix")

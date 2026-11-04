@@ -115,3 +115,38 @@ def test_drums_and_bass_both_land_on_their_targets():
     _, rep = render.render(stems, p)
     for name, pb in rep["part_balance"].items():
         assert pb["result_db"] == pytest.approx(pb["target_db"], abs=.5), (name, pb)
+
+
+def test_the_squash_guard_gives_back_loudness_instead_of_limiting_hard():
+    """R115: a dense song limited hard on its loudest moments comes out a
+    little quieter instead; plans without the guard render as before."""
+    import copy
+    from automix import analyze, plan as planner, render
+    t = np.arange(SR * 10) / SR
+    rng = np.random.default_rng(11)
+    hits = np.zeros_like(t)
+    for s in range(0, t.size - 2400, SR // 4):
+        hits[s:s + 2400] = rng.standard_normal(2400) * np.exp(-np.arange(2400) / 300)
+    stems = []
+    def add(name, a):
+        stems.append(analyze.Stem(name=name, path=name, sr=SR, audio=np.stack([a, a], 1).astype(np.float32)))
+    add("Drums.wav", .9 * hits)
+    add("Bass.wav", .3 * np.sin(2 * np.pi * 55 * t))
+    add("Synth.wav", .2 * np.sign(np.sin(2 * np.pi * 220 * t)))
+    analyze.detect_roles(stems)
+    for st in stems:
+        analyze.measure(st)
+    p = planner.build_plan(stems, planner.load_preset("trap"))
+    p["buses"]["master"]["target_lufs"] = -7.0           # push it into the limiter
+    guarded_mix, guarded = render.render(stems, p)
+    q = copy.deepcopy(p)
+    for k in ("max_gr_p95_db", "max_backoff_db"):
+        del q["buses"]["master"]["limiter"][k]
+    open_mix, unguarded = render.render(stems, q)
+    assert unguarded["limiter"]["gain_reduction_p95_db"] < -3.0          # the case the guard is for
+    assert 0 < guarded["limiter"]["backed_off_db"] <= 1.5
+    assert guarded["limiter"]["gain_reduction_p95_db"] > unguarded["limiter"]["gain_reduction_p95_db"]
+    assert guarded["lufs"] < unguarded["lufs"]
+    assert any("quieter than the target" in w for w in guarded["warnings"])
+    assert "backed_off_db" not in unguarded["limiter"]
+    assert dsp.true_peak_db(guarded_mix, SR) <= -1.0 + 1e-6 or guarded["true_peak_db"] <= p["buses"]["master"]["limiter"]["ceiling_db"]
