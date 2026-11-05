@@ -126,17 +126,25 @@ SR = 48000
 #: .2191, low_mid .5365 -> .5597, mid .1676 -> .1808, presence .0233 ->
 #: .0254, air .0080 -> .0086; width .145 -> .149; correlation .961 -> .958.
 #: Intended.  Saved plans render as before (replay of R94/R104/R115-R118).
+#: 2026-11-05 (R120): the demo's lead is near-mono (-26 dB side/mid), so
+#: pop_2020s now gives it the artificial double (two copies 9/14 ms late,
+#: +-7 cents, 800 Hz-9 kHz, -15 dB each side) and resonance smoothing
+#: (2-8 kHz average cut 0.07 dB here); no drum alignment (one mic per
+#: drum).  LUFS -11.58 -> -11.60, low .2191 -> .2184, low_mid .5597 ->
+#: .5705, mid .1808 -> .1726, presence .0254 -> .0236, air .0086 -> .0085;
+#: width .149 -> .160, correlation .958 -> .951.  Intended.  Saved plans
+#: render as before (replay of R94/R104/R115-R119).
 EXPECTED = {
-    "lufs": -11.58,
+    "lufs": -11.60,
     "crest_db": 12.49,
-    "width": 0.149,
-    "correlation": 0.958,
+    "width": 0.160,
+    "correlation": 0.951,
     "band_energy": {
-        "low": 0.2191,
-        "low_mid": 0.5597,
-        "mid": 0.1808,
-        "presence": 0.0254,
-        "air": 0.0086,
+        "low": 0.2184,
+        "low_mid": 0.5705,
+        "mid": 0.1726,
+        "presence": 0.0236,
+        "air": 0.0085,
     },
 }
 

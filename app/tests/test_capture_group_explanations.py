@@ -171,7 +171,8 @@ def _without_ratio_law(plan: dict) -> dict:
     parallel compression, vocal delay and its sends) and R114 the vocal
     character, drum/bass balance, release limiter, plate_v2 reverb and side
     air (R116 tempo-locked reverb, balance meter; R117 send law, saturation
-    law, drum compression); R25 plans predate all of them.  A plan without them still renders the R25 way, so they are set
+    law, drum compression; R119 compressor law, reverb duck; R120 drum align,
+    vocal double, resonance smoothing); R25 plans predate all of them.  A plan without them still renders the R25 way, so they are set
     aside here."""
     plan = json.loads(json.dumps(plan))
     for block in plan.get("tracks", []) + list(plan.get("buses", {}).values()):
@@ -219,8 +220,18 @@ def _without_ratio_law(plan: dict) -> dict:
     # R119: the compressor detector law and the voice-ducked vocal reverb
     plan.pop("compressor_law", None)
     (plan.get("reverb") or {}).pop("duck", None)
+    # R120: drum mics lined up, the lead's double and its resonance smoothing
+    plan.pop("drum_align", None)
+    for track in plan.get("tracks", []):
+        for key in ("align", "double", "resonance"):
+            track.pop(key, None)
+        if "evidence" in track:
+            track["evidence"] = [e for e in track["evidence"] if not e.startswith(
+                ("drum mic alignment", "artificial double", "dynamic resonance suppression",
+                 "not doubled:"))]
     if "warnings" in plan:
-        plan["warnings"] = [w for w in plan["warnings"] if not w.startswith("vocal delay:")]
+        plan["warnings"] = [w for w in plan["warnings"]
+                            if not w.startswith(("vocal delay:", "lead vocal not doubled"))]
     return plan
 
 

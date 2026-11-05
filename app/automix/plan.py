@@ -18,7 +18,7 @@ import sys
 import numpy as np
 from datetime import datetime, timezone
 
-from . import analyze, capture_groups as capmod, dsp, reference as refmod, sections, unmask, source_balance as balancemod, reference_balance as fitmod
+from . import align as alignmod, analyze, capture_groups as capmod, dsp, reference as refmod, sections, unmask, source_balance as balancemod, reference_balance as fitmod
 from .analyze import DRUM_ROLES, ROLES, VOCAL_ROLES, Stem
 
 SCHEMA_VERSION = 1
@@ -83,6 +83,32 @@ COMPRESSOR_LAW = "trailing_box_v1"
 #: the gaps (dsp.voice_duck; the renderer reads this name from here); depth from the style's
 #: techniques.vocal_reverb_duck_db, release an eighth note (clamped)
 REVERB_DUCK_LAW = "voice_duck_v1"
+#: R121: the lead vocal's artificial double (dsp.vocal_double, ADT): two
+#: copies 9 and 14 ms late whose delay drifts so their pitch wanders up to
+#: 7 cents either way (opposite sides in opposite phase), hard left/right,
+#: band-limited 800 Hz - 9 kHz (widener returns are high-passed around 1 kHz:
+#: the copies widen the upper voice, the low end does not comb),
+#: at the style's techniques.vocal_double_db under the voice -- a ceiling, not a
+#: target.  Values from SOS (5-20 ms, 2-10 cents, kept low).
+VOCAL_DOUBLE_LAW = "adt_v1"
+#: R122: the lead vocal's dynamic resonance suppression (dsp.resonance_suppress).
+#: Tuned on synthetic voices: a clean harmonic voice moves
+#: 0.2-0.4 dB in 2-8 kHz, an 8 dB resonance at 3.2 kHz is cut 1.7-2.9 dB.  On
+#: 15 MUSDB songs at ratio 1.0 our vocals came out *less* peaky than the pro
+#: stems (and 1.2 dB less present): the smoothing is kept gentle (style ratios
+#: 0.4-0.6) and the whole song is held to 0.6 dB average cut in 2-8 kHz -- how
+#: much darker the vocal gets is the owner's call, not the smoother's.
+#: ratio = the style's techniques.vocal_resonance_ratio times the intensity.
+RESONANCE_LAW = "res_suppress_v1"
+RESONANCE = {"detect_oct": round(1 / 6, 6), "notch_oct": round(1 / 3, 6), "ref_oct": 1.5,
+             "threshold_db": 2.5, "max_db": 6.0, "attack_ms": 5.0, "release_ms": 80.0,
+             "max_mean_cut_db": 0.6}
+VOCAL_DOUBLE = {"cents": 7.0, "delays_ms": [9.0, 14.0], "rates_hz": [0.23, 0.31],
+                "hpf_hz": 800.0, "lpf_hz": 9000.0}
+#: a lead already this wide (side against mid, dB) is not doubled
+DOUBLE_MAX_SOURCE_SIDE_DB = -20.0
+#: a vocal file whose name says it is a double
+_REAL_DOUBLE_RE = re.compile(r"(?<![a-z])(dbl|dbls|double|doubles|doubled|dub)(?![a-z])", re.I)
 REVERB_DUCK_MAX_DB = 8.0
 REVERB_DUCK_RELEASE_MS = (120.0, 400.0)
 REVERB_DUCK_DEFAULT_RELEASE_MS = 250.0
@@ -925,6 +951,36 @@ def _low_end_carve(tracks: list[dict], stems_by_id: dict, guards: dict, warnings
         )
 
 
+def _side_mid_db(a: np.ndarray) -> float:
+    """Side against mid energy of a track (dB); a mono or dual-mono track is -inf."""
+    a = np.asarray(a, dtype=np.float64)
+    if a.ndim != 2 or a.shape[1] < 2:
+        return float("-inf")
+    mid = float(np.mean(((a[:, 0] + a[:, 1]) / 2) ** 2))
+    side = float(np.mean(((a[:, 0] - a[:, 1]) / 2) ** 2))
+    if side <= 0.0 or mid <= 0.0:
+        return float("-inf")
+    return 10.0 * math.log10(side / mid)
+
+
+def _envelope_corr(a: np.ndarray, b: np.ndarray, sr: int) -> float:
+    """Correlation of two tracks' 50 ms level contours (dB), over the frames
+    where either sings.  A second take of the same line, or a harmony sung
+    with the lead, follows its phrasing (high); an answer line sung in the
+    lead's gaps does not (low)."""
+    hop = max(1, int(0.05 * sr))
+    n = min(a.shape[0], b.shape[0]) // hop
+    if n < 20:
+        return 0.0
+    ea = np.sqrt(np.mean(np.asarray(a[: n * hop], dtype=np.float64).reshape(n, hop, -1) ** 2, axis=(1, 2)))
+    eb = np.sqrt(np.mean(np.asarray(b[: n * hop], dtype=np.float64).reshape(n, hop, -1) ** 2, axis=(1, 2)))
+    da, db = 20 * np.log10(ea + 1e-9), 20 * np.log10(eb + 1e-9)
+    live = (da > da.max() - 40.0) | (db > db.max() - 40.0)
+    if live.sum() < 20 or np.std(da[live]) == 0 or np.std(db[live]) == 0:
+        return 0.0
+    return float(np.corrcoef(da[live], db[live])[0, 1])
+
+
 def _capture_group_facts(stems: list[Stem]) -> list[dict]:
     """What the capture-group validator needs to know about each loaded track.
 
@@ -1740,6 +1796,88 @@ def build_plan(
     _low_end_carve(tracks, stems_by_id, guards, warnings, grouped_ids)
     unmask_summary = unmask.build(stems, tracks, intensity, guards)
 
+    # R120: the kit's microphones lined up in time and polarity (align.py).
+    # Only when the evidence is clear; a declared capture group is the user's
+    # own statement and is never touched.  A plan without the block (and a
+    # session with fewer than two drum mics) renders exactly as before.
+    drum_align = None
+    align_mode = (preset.get("techniques") or {}).get("drum_align", "off")
+    if align_mode not in alignmod.MODES:
+        raise PlanError(f"style technique drum_align must be one of {', '.join(alignmod.MODES)}, "
+                        f"got {align_mode!r}")
+    # (the renderer moves a mic before anything else; the loudness window
+    # frozen below was measured on the unmoved audio -- at most 10 ms off,
+    # on a window seconds long)
+    if align_mode != "off":
+        sr_of = {s.sr for s in stems}
+        if len(sr_of) == 1:
+            result = alignmod.plan_alignment(
+                tracks, {t["id"]: s.audio for s, t in zip(stems, tracks)}, sr_of.pop(),
+                mode=align_mode, exclude=grouped_ids,
+            )
+            if result["decisions"] or result["moves"]:
+                drum_align = {"law": alignmod.ALIGN_LAW, "mode": align_mode,
+                              "decisions": result["decisions"]}
+            for t in tracks:
+                mv = result["moves"].get(t["id"])
+                if mv:
+                    t["align"] = mv
+                    t.setdefault("evidence", []).append(
+                        f"drum mic alignment: {mv['advance_ms']:.3f} ms earlier"
+                        + (", polarity flipped" if mv["polarity"] == -1 else "")
+                    )
+
+    # R121: the lead vocal's artificial double -- unless the session already
+    # stacks the voice: a vocal file named as a double, or any other vocal
+    # track (a second lead, a backing vocal) that rises and falls with the
+    # lead's phrasing -- a second take of the line, or a harmony sung with
+    # it.  Either way the lead is already thick; an answer line sung in the
+    # lead's gaps does not count.
+    double_db = (preset.get("techniques") or {}).get("vocal_double_db")
+    if double_db is not None and float(intensity) >= 0.25:
+        level = float(double_db) + 20.0 * math.log10(float(intensity))
+        leads = [(s, t) for s, t in zip(stems, tracks)
+                 if t["role"] == "lead_vocal" and t["id"] not in grouped_ids]
+        real = [t["id"] for s, t in zip(stems, tracks)
+                if t["role"] in analyze.VOCAL_ROLES and _REAL_DOUBLE_RE.search(s.name)]
+        for s_l, t_l in leads:
+            for s, t in zip(stems, tracks):
+                if t["id"] == t_l["id"] or t["role"] not in analyze.VOCAL_ROLES:
+                    continue
+                if _envelope_corr(s_l.audio, s.audio, s.sr) >= 0.85:
+                    real.append(t["id"])
+        if leads and real:
+            warnings.append("lead vocal not doubled: the session already stacks the voice ("
+                            + ", ".join(sorted(set(real))) + ")")
+        elif leads and -30.0 <= level <= -6.0:
+            for s_l, t in leads:
+                # a lead that already carries its own stereo (a printed double, a
+                # stereo effect) is wide enough: measured on 15 MUSDB songs, the
+                # pro vocal stems sit at -16 dB side/mid and ours without a double
+                # already matched them; more side than that rates lower (De Man
+                # 2015).  The double is for the dry, mono lead.
+                sm = _side_mid_db(s_l.audio)
+                if sm > DOUBLE_MAX_SOURCE_SIDE_DB:
+                    t.setdefault("evidence", []).append(
+                        f"not doubled: the lead is already stereo ({sm:+.1f} dB side/mid)")
+                    continue
+                t["double"] = {"law": VOCAL_DOUBLE_LAW, "level_db": round(level, 2),
+                               **json.loads(json.dumps(VOCAL_DOUBLE))}
+                t.setdefault("evidence", []).append(
+                    f"artificial double (ADT): +/-{VOCAL_DOUBLE['cents']:.0f} cents, "
+                    f"{VOCAL_DOUBLE['delays_ms'][0]:.0f}/{VOCAL_DOUBLE['delays_ms'][1]:.0f} ms, "
+                    f"{level:+.1f} dB each side")
+
+    # R122: the lead vocal's resonances smoothed, by the style's ratio
+    res_ratio = float((preset.get("techniques") or {}).get("vocal_resonance_ratio", 0.0)) * float(intensity)
+    if res_ratio >= 0.05:
+        for t in tracks:
+            if t["role"] == "lead_vocal" and t["id"] not in grouped_ids:
+                t["resonance"] = {"law": RESONANCE_LAW, "ratio": round(min(res_ratio, 2.0), 3), **RESONANCE}
+                t.setdefault("evidence", []).append(
+                    f"dynamic resonance suppression: ratio {t['resonance']['ratio']:.2f}, "
+                    f"threshold {RESONANCE['threshold_db']:.1f} dB, at most {RESONANCE['max_db']:.0f} dB")
+
     # Fader gain alone cannot preserve balance: EQ, compression and saturation
     # change the level differently for each role.  Freeze the source window
     # and source level in the plan; the renderer executes this bounded matching rule
@@ -2147,6 +2285,9 @@ def build_plan(
         plan["source"]["decode_policy"] = decode_policy
     if reverb_amount is not None:
         plan["reverb"]["manual_amount"] = reverb_amount
+    if drum_align is not None:
+        # the receipt; the renderer reads only the tracks' align blocks
+        plan["drum_align"] = drum_align
     if receipt is not None:
         # the receipt is optional metadata: it says what was protected and
         # where the protection stops.  The renderer never reads it -- the

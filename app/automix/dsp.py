@@ -1470,3 +1470,213 @@ def delay_send(
             break
     return apply_eq(out, sr, [("highpass", hpf_hz, 0.0, 0.707),
                               ("lowpass", min(lpf_hz, sr * 0.45), 0.0, 0.707)])
+
+
+# ------------------------------------------------- R121 vocal doubler (ADT)
+
+#: R121: the lead vocal's artificial double (ADT: the tape trick behind a
+#: "thick" lead without a real double -- two short copies whose delay drifts
+#: slowly, so each one's pitch wanders a few cents sharp and flat, hard left
+#: and right, low under the voice).  A drifting delay *is* a pitch change
+#: (ratio 1 - d'(t)), with no grains and no splices; a short-grain shifter
+#: was tried first and resets the phase every grain, so a 7-cent shift never
+#: builds up (it measures as a 40 Hz flutter, no pitch change).  Plans
+#: without a track's ``double`` block are not doubled.
+DOUBLE_LAWS = ("adt_v1",)
+
+
+def drifting_delay(x: np.ndarray, sr: int, delay_ms: float, cents: float, rate_hz: float,
+                   phase: float = 0.0) -> np.ndarray:
+    """``x`` read ``delay_ms`` late, the delay swinging sinusoidally at
+    ``rate_hz`` just enough that the pitch moves up to ``cents`` either way.
+
+    d(t) = d0 + A sin(2 pi f t + phase), pitch ratio 1 - d'(t), so
+    A = (1 - 2**(-cents/1200)) / (2 pi f).  Same length, deterministic,
+    linear interpolation, nothing read before the start.
+    """
+    x = np.asarray(x, dtype=np.float64)
+    n = x.shape[0]
+    dev = 1.0 - 2.0 ** (-abs(float(cents)) / 1200.0)
+    amp = dev / (2.0 * np.pi * float(rate_hz)) * sr          # samples
+    t = np.arange(n, dtype=np.float64)
+    d = delay_ms * 1e-3 * sr + amp * np.sin(2.0 * np.pi * rate_hz * t / sr + phase)
+    pos = t - d
+    i0 = np.floor(pos).astype(np.int64)
+    frac = pos - i0
+    ok = (i0 >= 0) & (i0 + 1 < n)
+    out = np.zeros(n)
+    out[ok] = x[i0[ok]] * (1.0 - frac[ok]) + x[i0[ok] + 1] * frac[ok]
+    return out
+
+
+def vocal_double(x: np.ndarray, sr: int, spec: dict) -> np.ndarray:
+    """The stereo double of a (stereo) lead vocal, to be added to it.
+
+    Left ``delays_ms[0]`` late, right ``delays_ms[1]`` late; each drifts by
+    up to ``cents`` at its own rate (``rates_hz``) and in opposite phase, so
+    when one side is sharp the other is flat.  Each side at ``level_db``
+    under the voice, band-limited to ``hpf_hz``..``lpf_hz`` (no doubled lows,
+    no doubled sibilance).
+    """
+    law = spec.get("law")
+    if law not in DOUBLE_LAWS:
+        raise ValueError(f"unknown double law {law!r}")
+    m = np.asarray(x, dtype=np.float64).mean(axis=1)
+    cents = float(spec["cents"])
+    dl, dr = (float(v) for v in spec["delays_ms"])
+    rl, rr = (float(v) for v in spec["rates_hz"])
+    g = db_to_lin(float(spec["level_db"]))
+    y = np.stack([drifting_delay(m, sr, dl, cents, rl, 0.0),
+                  drifting_delay(m, sr, dr, cents, rr, np.pi)], 1) * g
+    return apply_eq(y, sr, [("highpass", float(spec.get("hpf_hz", 180.0)), 0.0, 0.707),
+                            ("lowpass", min(float(spec.get("lpf_hz", 9000.0)), sr * 0.45), 0.0, 0.707)])
+
+
+# ------------------------------------------- R122 dynamic resonance suppression
+
+#: R122: narrow, moving resonances on the lead vocal (harshness 2-8 kHz,
+#: honk around 1 kHz) are pulled down where they stick out of the voice's own
+#: spectrum, frame by frame -- a de-esser for every band.  It smooths peaks;
+#: it does not tilt the broadband brightness (that decision is the owner's).
+#: Plans without a track's ``resonance`` block are not touched.
+RESONANCE_LAWS = ("res_suppress_v1",)
+
+
+def _bin_windows(freqs: np.ndarray, octaves: float, df: float) -> tuple[np.ndarray, np.ndarray]:
+    """Per bin, the [lo, hi) bin range of a window ``octaves`` wide around it."""
+    k = np.arange(freqs.size)
+    half = 2.0 ** (octaves / 2.0)
+    lo = np.floor(np.maximum(freqs / half / df, 0)).astype(np.int64)
+    hi = np.ceil(freqs * half / df).astype(np.int64) + 1
+    lo = np.minimum(lo, k)
+    hi = np.maximum(np.minimum(hi, freqs.size), k + 1)
+    return lo, hi
+
+
+def _window_mean(v: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
+    """Mean of each frame's values over every bin's window (cumulative sums)."""
+    c = np.concatenate([np.zeros((v.shape[0], 1)), np.cumsum(v, axis=1)], axis=1)
+    return (c[:, hi] - c[:, lo]) / (hi - lo)
+
+
+def resonance_weight(freqs: np.ndarray) -> np.ndarray:
+    """Where the detector listens: 0 below 800 Hz, up to 1 at 2 kHz, 1 to
+    8 kHz, down to 0.5 at 12 kHz and 0 at 16 kHz."""
+    lf = np.log2(np.maximum(freqs, 1.0))
+    return np.interp(lf, np.log2([800.0, 2000.0, 8000.0, 12000.0, 16000.0]), [0.0, 1.0, 1.0, 0.5, 0.0],
+                     left=0.0, right=0.0)
+
+
+def resonance_suppress(x: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dict]:
+    """Pull narrow resonances down, then hold the whole song to ``max_mean_cut_db``:
+    if the average cut over 2-8 kHz came out deeper, ratio and max_db are
+    both scaled by cap/cut and the pass is run once more.  Every step of the
+    gain (the excess times the ratio, the max_db ceiling, the smoothing over
+    frequency, the attack/release) is linear in that common scale, so every
+    cut -- and the average -- shrinks by exactly that factor.  A smoother that
+    removes more than the cap changes the voice, not its peaks."""
+    y, rec = _resonance_pass(x, sr, spec)
+    cap = spec.get("max_mean_cut_db")
+    raw = rec.pop("_mean_cut_2k_8k_raw")
+    if cap is not None and raw > float(cap) > 0.0:
+        scale = float(cap) / raw
+        ratio = float(spec.get("ratio", 0.6)) * scale
+        gmax = float(spec.get("max_db", 6.0)) * scale
+        y, rec2 = _resonance_pass(x, sr, {**spec, "ratio": ratio, "max_db": gmax})
+        rec2.pop("_mean_cut_2k_8k_raw")
+        rec = {**rec2, "capped_from_db": rec["mean_cut_2k_8k_db"], "ratio_used": round(ratio, 3),
+               "max_db_used": round(gmax, 2)}
+    return y, rec
+
+
+def _resonance_pass(x: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dict]:
+    """Pull narrow resonances of a (stereo) track down, linked across channels.
+
+    Per frame (STFT, ~43 ms, hop a quarter of that): the power in a
+    ``detect_oct`` window around each bin against the power in a
+    ``ref_oct`` window with the ``notch_oct`` around the bin left out; what sticks out more than ``threshold_db`` is cut by
+    ``ratio`` of the excess times the listening weight, at most ``max_db``,
+    smoothed over a sixth of an octave, attack ``attack_ms`` / release
+    ``release_ms``; frames more than 40 dB under the track's loudest are left
+    alone.  Returns (audio, receipt).
+    """
+    if spec.get("law") not in RESONANCE_LAWS:
+        raise ValueError(f"unknown resonance law {spec.get('law')!r}")
+    x = np.asarray(x, dtype=np.float64)
+    if x.ndim == 1:
+        x = x[:, None]
+    n, ch = x.shape
+    N = 2048 if sr <= 50000 else 4096
+    hop = N // 4
+    win = np.sqrt(0.5 - 0.5 * np.cos(2.0 * np.pi * np.arange(N) / N))   # periodic sqrt-Hann
+    pad = N
+    xp = np.concatenate([np.zeros((pad, ch)), x, np.zeros((pad + hop, ch))])
+    frames = (xp.shape[0] - N) // hop + 1
+    freqs = np.fft.rfftfreq(N, 1.0 / sr)
+    df = freqs[1]
+    dlo, dhi = _bin_windows(freqs, float(spec.get("detect_oct", 1 / 6)), df)
+    rlo, rhi = _bin_windows(freqs, float(spec.get("ref_oct", 1.5)), df)
+    slo, shi = _bin_windows(freqs, 1 / 6, df)
+    nlo, nhi = _bin_windows(freqs, float(spec.get("notch_oct", 1 / 3)), df)
+    w = resonance_weight(freqs)[None, :]
+    theta = float(spec.get("threshold_db", 4.0))
+    ratio = float(spec.get("ratio", 0.6))
+    gmax = float(spec.get("max_db", 6.0))
+    a_att = 1.0 - math.exp(-hop / (float(spec.get("attack_ms", 5.0)) * 1e-3 * sr))
+    a_rel = 1.0 - math.exp(-hop / (float(spec.get("release_ms", 80.0)) * 1e-3 * sr))
+    # the gate: frame levels against the loudest frame
+    mono = xp.mean(axis=1)
+    idx = np.arange(frames) * hop
+    lev = np.array([np.mean(mono[i: i + N] ** 2) for i in idx])
+    lev_db = 10.0 * np.log10(lev + 1e-20)
+    live = lev_db > lev_db.max() - 40.0
+    out = np.zeros_like(xp)
+    g_prev = np.zeros(freqs.size)
+    cut_sum = np.zeros(freqs.size)
+    cut_frames = 0
+    peak_cut = []
+    chunk = 1024
+    for c0 in range(0, frames, chunk):
+        c1 = min(frames, c0 + chunk)
+        seg = np.stack([xp[i: i + N] for i in idx[c0:c1]])          # (f, N, ch)
+        X = np.fft.rfft(seg * win[None, :, None], axis=1)            # (f, bins, ch)
+        P = np.mean(np.abs(X) ** 2, axis=2) + 1e-20                  # linked: one detector
+        # both sides are power means: a harmonic spectrum's valleys must not
+        # pull the reference down (a dB mean sits in the valleys, and then
+        # every harmonic "sticks out")
+        det = 10.0 * np.log10(np.maximum(_window_mean(P, dlo, dhi), 1e-20))
+        # ... and the reference leaves out the neighbourhood it judges, or a
+        # resonance would lift its own yardstick
+        cP = np.concatenate([np.zeros((P.shape[0], 1)), np.cumsum(P, axis=1)], axis=1)
+        outer = cP[:, rhi] - cP[:, rlo]
+        inner = cP[:, nhi] - cP[:, nlo]
+        cnt = np.maximum((rhi - rlo) - (nhi - nlo), 1)
+        ref = 10.0 * np.log10(np.maximum((outer - inner) / cnt, 1e-20))
+        excess = np.maximum(det - ref - theta, 0.0)
+        g = -np.minimum(ratio * w * excess, gmax)
+        g = _window_mean(g, slo, shi)
+        g[~live[c0:c1]] = 0.0
+        sm = np.empty_like(g)
+        for j in range(g.shape[0]):
+            a = np.where(g[j] < g_prev, a_att, a_rel)
+            g_prev = g_prev + (g[j] - g_prev) * a
+            sm[j] = g_prev
+        lv = live[c0:c1]
+        if lv.any():
+            cut_sum += -sm[lv].sum(axis=0)
+            cut_frames += int(lv.sum())
+            peak_cut.append(-sm[lv].min(axis=1))
+        Y = X * (10.0 ** (sm / 20.0))[:, :, None]
+        y = np.fft.irfft(Y, N, axis=1) * win[None, :, None]
+        for j, i in enumerate(idx[c0:c1]):
+            out[i: i + N] += y[j]
+    y = out[pad: pad + n] / 2.0          # sqrt-Hann^2 = Hann; four of them overlap to 2
+    mean_cut = cut_sum / max(cut_frames, 1)
+    band = (freqs >= 2000.0) & (freqs <= 8000.0)
+    pk = np.concatenate(peak_cut) if peak_cut else np.zeros(1)
+    receipt = {"mean_cut_2k_8k_db": round(float(mean_cut[band].mean()), 2),
+               "_mean_cut_2k_8k_raw": float(mean_cut[band].mean()),
+               "deepest_mean_cut_db": round(float(mean_cut.max()), 2),
+               "deepest_mean_cut_hz": round(float(freqs[int(np.argmax(mean_cut))]), 0),
+               "p95_frame_peak_cut_db": round(float(np.percentile(pk, 95)), 2)}
+    return (y if ch > 1 else y[:, 0]), receipt

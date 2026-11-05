@@ -76,6 +76,9 @@
   },
   "techniques": {
     "vocal_reverb_duck_db": 3.0,
+    "drum_align": "full",
+    "vocal_resonance_ratio": 0.6,
+    "vocal_double_db": -15.0,
     "kick_duck_db": 0.0,
     "drum_parallel": 0.0,
     "drum_forward_db": -2.0,

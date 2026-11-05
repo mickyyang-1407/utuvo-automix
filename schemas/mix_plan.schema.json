@@ -300,6 +300,16 @@
       "description": "R119: how every compressor's detector (tracks, buses, the drum parallel copy, the vocal character's parallel copy, the master glue) reads the signal. trailing_box_v1: the attack and release windows end at the sample -- the detector reads only the past, so a hit's start passes for about the attack time and its body is held. When absent: centred_box_v1, windows centred on the sample (the detector sees half a window ahead), as plans before R119 were rendered.",
       "enum": ["centred_box_v1", "trailing_box_v1"]
     },
+    "drum_align": {
+      "description": "R120 receipt: every drum mic the alignment looked at, moved or left alone, with the measured lag, its confidence and the reason. The renderer never reads it; the moves are in the tracks' align blocks.",
+      "type": "object",
+      "required": ["law", "mode", "decisions"],
+      "properties": {
+        "law": {"enum": ["gccphat_v1"]},
+        "mode": {"enum": ["full", "polarity"]},
+        "decisions": {"type": "array", "items": {"type": "object"}}
+      }
+    },
     "delay": {
       "description": "The vocal delay that tracks' sends.delay feed. Locked to the song's tempo when it is clear (tempo records what was found), otherwise a slapback. The return is ducked while the sent signal plays and joins the fx bus.",
       "type": "object",
@@ -796,6 +806,50 @@
         },
         "dynamic_eq": {
           "$ref": "#/$defs/dynamic_eq"
+        },
+        "resonance": {
+          "description": "R122: dynamic resonance suppression (dsp.resonance_suppress): per STFT frame, the power in a detect_oct window around each bin against the power of a ref_oct window without the notch_oct around it; the excess over threshold_db times ratio times the listening weight (0 below 800 Hz, 1 from 2 to 8 kHz) is cut, at most max_db, attack_ms / release_ms; frames 40 dB under the track's loudest are left alone. Before the compressor. When absent the track is not touched.",
+          "type": "object",
+          "required": ["law", "detect_oct", "notch_oct", "ref_oct", "threshold_db", "ratio", "max_db", "attack_ms", "release_ms"],
+          "properties": {
+            "law": {"enum": ["res_suppress_v1"]},
+            "detect_oct": {"type": "number", "minimum": 0.041666, "maximum": 1},
+            "notch_oct": {"type": "number", "minimum": 0.041666, "maximum": 1},
+            "ref_oct": {"type": "number", "minimum": 0.5, "maximum": 3},
+            "threshold_db": {"type": "number", "minimum": 0.5, "maximum": 20},
+            "ratio": {"type": "number", "minimum": 0, "maximum": 2},
+            "max_db": {"type": "number", "minimum": 0, "maximum": 12},
+            "attack_ms": {"type": "number", "minimum": 0.5, "maximum": 100},
+            "release_ms": {"type": "number", "minimum": 5, "maximum": 1000},
+            "max_mean_cut_db": {"description": "Whole-song cap: if the average cut over 2-8 kHz would be deeper, the ratio is scaled down once so it is not. Absent: no cap.", "type": "number", "minimum": 0.1, "maximum": 6}
+          },
+          "additionalProperties": false
+        },
+        "double": {
+          "description": "R121: the lead vocal's artificial double (ADT, dsp.vocal_double): two copies delays_ms late (left, right) whose delay drifts at rates_hz so their pitch wanders up to cents either way, in opposite phase, each level_db under the voice, band-limited hpf_hz..lpf_hz; added after the track's own processing, before its sends. When absent the track is not doubled.",
+          "type": "object",
+          "required": ["law", "level_db", "cents", "delays_ms", "rates_hz"],
+          "properties": {
+            "law": {"enum": ["adt_v1"]},
+            "level_db": {"type": "number", "minimum": -30, "maximum": -6},
+            "cents": {"type": "number", "minimum": 0.5, "maximum": 25},
+            "delays_ms": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": 1, "maximum": 40}},
+            "rates_hz": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": 0.05, "maximum": 2}},
+            "hpf_hz": {"type": "number", "minimum": 20, "maximum": 1000},
+            "lpf_hz": {"type": "number", "minimum": 2000, "maximum": 20000}
+          },
+          "additionalProperties": false
+        },
+        "align": {
+          "description": "R120: this drum mic moved earlier and/or flipped so the kit's mics line up (align.py: GCC-PHAT on the instrument's hits, only when the evidence is clear). The renderer applies it first, before the gain. When absent the track is rendered as imported.",
+          "type": "object",
+          "required": ["law", "advance_ms", "polarity"],
+          "properties": {
+            "law": {"enum": ["gccphat_v1"]},
+            "advance_ms": {"type": "number", "minimum": 0, "maximum": 10},
+            "polarity": {"enum": [1, -1]}
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": true,

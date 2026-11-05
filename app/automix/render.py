@@ -24,7 +24,7 @@ import wave
 
 import numpy as np
 
-from . import analyze, dsp, unmask
+from . import align as alignmod, analyze, dsp, unmask
 from .plan import (BALANCE_METER_LAW, BALANCE_SEND_LAW, REVERB_DUCK_LAW, ROLE_GROUP, SEND_MIN, PlanError,
                    _manual_reverb_amount)
 
@@ -651,6 +651,48 @@ def _vocal_delay(sent: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dic
                  "ducking_db": round(_rms_db(out) - open_rms, 2)}
 
 
+def _double(x: np.ndarray, sr: int, spec: dict, tid: str) -> np.ndarray:
+    """R121: a track's ``double`` block, checked, then dsp.vocal_double."""
+    def num(key, lo, hi):
+        v = spec.get(key)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not (lo <= float(v) <= hi):
+            raise RenderError(f"{tid}: double {key} must be {lo}..{hi}, got {v!r}")
+        return float(v)
+    if spec.get("law") not in dsp.DOUBLE_LAWS:
+        raise RenderError(f"{tid}: unknown double law {spec.get('law')!r}")
+    num("level_db", -30.0, -6.0)
+    num("cents", 0.5, 25.0)
+    num("hpf_hz", 20.0, 1000.0)
+    num("lpf_hz", 2000.0, 20000.0)
+    for key, lo, hi in (("delays_ms", 1.0, 40.0), ("rates_hz", 0.05, 2.0)):
+        v = spec.get(key)
+        if not isinstance(v, list) or len(v) != 2 or not all(
+                not isinstance(e, bool) and isinstance(e, (int, float)) and lo <= float(e) <= hi for e in v):
+            raise RenderError(f"{tid}: double {key} must be two numbers {lo}..{hi}, got {v!r}")
+    return dsp.vocal_double(x, sr, spec)
+
+
+#: R122: the bounds a track's ``resonance`` block must keep
+RESONANCE_BOUNDS = {"detect_oct": (1 / 24, 1.0), "notch_oct": (1 / 24, 1.0), "ref_oct": (0.5, 3.0),
+                    "threshold_db": (0.5, 20.0), "ratio": (0.0, 2.0), "max_db": (0.0, 12.0),
+                    "attack_ms": (0.5, 100.0), "release_ms": (5.0, 1000.0)}
+
+
+def _resonance(x: np.ndarray, sr: int, spec: dict, tid: str) -> tuple[np.ndarray, dict]:
+    """R122: a track's ``resonance`` block, checked, then dsp.resonance_suppress."""
+    if spec.get("law") not in dsp.RESONANCE_LAWS:
+        raise RenderError(f"{tid}: unknown resonance law {spec.get('law')!r}")
+    if "max_mean_cut_db" in spec:
+        v = spec["max_mean_cut_db"]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not (0.1 <= float(v) <= 6.0):
+            raise RenderError(f"{tid}: resonance max_mean_cut_db must be 0.1..6, got {v!r}")
+    for key, (lo, hi) in RESONANCE_BOUNDS.items():
+        v = spec.get(key)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not (lo <= float(v) <= hi):
+            raise RenderError(f"{tid}: resonance {key} must be {lo:g}..{hi:g}, got {v!r}")
+    return dsp.resonance_suppress(x, sr, spec)
+
+
 def render(
     stems: list,
     plan: dict,
@@ -735,6 +777,8 @@ def render(
         follow.add("vocal")
     reverb_in_of: dict[str, np.ndarray] = {}
     delay_in_of: dict[str, np.ndarray] = {}
+    doubled: list[dict] = []
+    resonance: list[dict] = []
 
     for st in stems:
         # the track id must come from the one place that defines it: the
@@ -766,6 +810,18 @@ def render(
                     "delta_db": round(_rms_db(after) - _rms_db(before), 2),
                 }
             )
+
+        # R120: the kit's mics lined up (align.py); before anything else, so
+        # every later step -- and the bus they meet on -- hears them in time
+        al = t.get("align")
+        if al:
+            try:
+                x = alignmod.apply(x, sr, al)
+            except ValueError as exc:
+                raise RenderError(f"{tid}: {exc}") from exc
+            chain.append({"step": f"aligned {float(al.get('advance_ms', 0.0)):.3f} ms earlier"
+                          + (", polarity flipped" if int(al.get("polarity", 1)) == -1 else ""),
+                          "delta_db": 0.0})
 
         x = x * dsp.db_to_lin(float(t.get("gain_db", 0.0)))
         chain.append({"step": "gain", "delta_db": round(float(t.get("gain_db", 0.0)), 2)})
@@ -824,6 +880,16 @@ def render(
             x, dynamic = _dynamic_eq(x, sr, t['dynamic_eq'])
             _mark('dynamic vocal EQ', before)
 
+        # R122: narrow resonances pulled down where they stick out of the
+        # voice's own spectrum (dsp.resonance_suppress), first in the dynamics
+        res = t.get("resonance")
+        if res:
+            before = x
+            x, res_receipt = _resonance(x, sr, res, tid)
+            x = x.astype(before.dtype)
+            _mark("resonance suppression", before)
+            resonance.append({"track": tid, **res_receipt})
+
         before = x.copy()
         crest_before = analyze._envelope_crest_db(x, sr)
         x = _apply_comp(x, sr, t.get("comp"), comp_law)
@@ -860,6 +926,17 @@ def render(
         x = _pan(x, float(t.get("pan", 0.0)))
         lr_after = _lr_db(x)
         _mark("pan", before)
+
+        # R121: the lead's artificial double, after the pan (it is its own hard
+        # left/right pair) and before the loudness match, so the track still
+        # lands on its promised level; the sends hear the double too
+        dbl = t.get("double")
+        if dbl:
+            before = x
+            x = x + _double(x, sr, dbl, tid).astype(x.dtype)
+            _mark("double", before)
+            doubled.append({"track": tid, "level_db": float(dbl["level_db"]), "cents": float(dbl["cents"]),
+                            "delays_ms": [float(v) for v in dbl["delays_ms"]]})
 
         matched = None
         if t.get("level_match") is not None:
@@ -1277,6 +1354,23 @@ def render(
         report["compressor_law"] = comp_law
     if reverb_duck_report is not None:
         report["reverb_duck"] = reverb_duck_report
+    if doubled:
+        report["vocal_double"] = doubled
+    if resonance:
+        report["resonance"] = resonance
+    aligned = [{"track": t["id"], "advance_ms": float(t["align"].get("advance_ms", 0.0)),
+                "polarity": int(t["align"].get("polarity", 1))}
+               for t in plan.get("tracks", []) if t.get("align")]
+    da = plan.get("drum_align")
+    if aligned or da:
+        report["drum_align"] = {
+            "moved": aligned,
+            # a mic the plan moved or flipped is never also "left as recorded"
+            "left_alone": [{"track": d.get("track"), "reason": d.get("reason")}
+                           for d in ((da or {}).get("decisions") or [])
+                           if d.get("decision") == "unchanged" and d.get("reason")
+                           and d.get("track") not in {a["track"] for a in aligned}],
+        }
     report["space"] = {"reverb_ir_law": ir_law, "side_air_db": float(m.get("side_air_db") or 0.0)}
     timing = (plan.get("reverb") or {}).get("timing")
     if isinstance(timing, dict) and timing.get("bpm"):
@@ -1619,6 +1713,33 @@ def write_report(path: str, plan: dict, report: dict, stems: list) -> None:
              f"{report['reverb_duck'].get('gain_in_gaps_db')} dB in the gaps (medians); release "
              f"{report['reverb_duck']['release_ms']:.0f} ms |"]
             if report.get("reverb_duck") and "depth_db" in report["reverb_duck"]
+            else []
+        ),
+        *(
+            ["| vocal resonances smoothed (dynamic, per band) | "
+             + ", ".join(f"{r['track']}: {r['mean_cut_2k_8k_db']:.1f} dB average in 2-8 kHz, deepest "
+                         f"{r['deepest_mean_cut_db']:.1f} dB around {r['deepest_mean_cut_hz']:.0f} Hz"
+                         for r in report["resonance"]) + " |"]
+            if report.get("resonance")
+            else []
+        ),
+        *(
+            ["| lead vocal doubled (artificial double tracking) | "
+             + ", ".join(f"{d['track']}: +/-{d['cents']:.0f} cents, "
+                         f"{d['delays_ms'][0]:.0f}/{d['delays_ms'][1]:.0f} ms, {d['level_db']:+.1f} dB each side"
+                         for d in report["vocal_double"]) + " |"]
+            if report.get("vocal_double")
+            else []
+        ),
+        *(
+            ["| drum mics lined up (time, polarity) | "
+             + (", ".join(f"{a['track']} {a['advance_ms']:.2f} ms earlier"
+                          + (" + polarity flipped" if a["polarity"] == -1 else "")
+                          for a in report["drum_align"]["moved"]) or "nothing needed moving")
+             + "".join(f"; {x['track']} left as recorded ({x['reason']})"
+                       for x in report["drum_align"]["left_alone"])
+             + " |"]
+            if report.get("drum_align")
             else []
         ),
         *(
