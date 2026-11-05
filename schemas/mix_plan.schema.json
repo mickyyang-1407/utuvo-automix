@@ -994,7 +994,7 @@
           "additionalProperties": false
         },
         "duck": {
-          "description": "Bass bus only: a sidechain. The bass bus dips by up to depth_db while the key tracks (the kick, or a whole kit's low end) hit; the dip follows how hard they hit. Plans without it are rendered as before.",
+          "description": "Bass bus only: a sidechain. The bass bus dips by up to depth_db while the key tracks (the kick, or a whole kit's low end) hit; the dip follows how hard they hit. kick_duck_v1 dips the whole bus; R121 kick_duck_band_v1 dips only the band below crossover_hz (zero-phase LR4 magnitudes, the bands sum to the bus exactly), keyed on the key below key_lowpass_hz, so the bass above the crossover keeps its level. Plans without it are rendered as before.",
           "type": "object",
           "required": [
             "law",
@@ -1004,7 +1004,8 @@
           "properties": {
             "law": {
               "enum": [
-                "kick_duck_v1"
+                "kick_duck_v1",
+                "kick_duck_band_v1"
               ]
             },
             "key_ids": {
@@ -1033,8 +1034,22 @@
               "type": "number",
               "minimum": 10,
               "maximum": 1000
+            },
+            "crossover_hz": {
+              "description": "kick_duck_band_v1: the split; the planner writes 1.6 x kick_f0_hz held to 90-130 Hz (120 Hz when the key has no fundamental in 40-90 Hz).",
+              "type": "number",
+              "minimum": 60,
+              "maximum": 250
+            },
+            "kick_f0_hz": {
+              "description": "Receipt: the key's long-term spectral peak in 40-90 Hz the crossover came from. The renderer reads crossover_hz, not this.",
+              "type": "number",
+              "minimum": 20,
+              "maximum": 200
             }
           },
+          "if": {"properties": {"law": {"const": "kick_duck_band_v1"}}},
+          "then": {"required": ["crossover_hz", "key_lowpass_hz"]},
           "additionalProperties": false
         },
         "parallel": {

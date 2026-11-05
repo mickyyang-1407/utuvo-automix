@@ -171,6 +171,15 @@ def _open_drum_track_comp(spec: dict) -> tuple[dict, dict]:
 #:   tempo_delay_v1 -- a vocal delay on the beat, ducked while the voice sings
 KICK_DUCK_LAW = "kick_duck_v1"
 KICK_DUCK_MAX_DB = 6.0
+#: R121 (kick_duck_band_v1): new plans duck only the bass below a crossover
+#: at 1.6 x the kick's fundamental (90-130 Hz; dsp.kick_crossover_hz), keyed
+#: on the kick below 120 Hz.  The kick and the bass's fundamental share that
+#: range; the bass's line and attack (200 Hz - 2 kHz), the part a small
+#: speaker plays, keep their level under every kick (band-limited sidechains,
+#: e.g. Trackspacer's HP/LP limits, do the same).  kick_duck_v1 plans render
+#: as before.
+KICK_DUCK_BAND_LAW = "kick_duck_band_v1"
+KICK_DUCK_KEY_LOWPASS_HZ = 120.0
 DRUM_PARALLEL_LAW = "parallel_v1"
 VOCAL_DELAY_LAW = "tempo_delay_v1"
 #:   vocal_character_v1 -- weight and edge on the vocal bus: a parallel
@@ -1087,11 +1096,24 @@ def _mix_techniques(preset: dict, intensity: float, stems: list[Stem], tracks: l
         if by_role.get("kick"):
             duck = {"key_ids": sorted(by_role["kick"])}
         elif by_role.get("drums_full"):
-            # a whole kit: listen to its low end only, where the kick is
-            duck = {"key_ids": sorted(by_role["drums_full"]), "key_lowpass_hz": 150.0}
+            # a whole kit: the key below (its low end, where the kick is)
+            # is the same 120 Hz low-pass every R121 key gets
+            duck = {"key_ids": sorted(by_role["drums_full"])}
         if duck is not None:
-            buses["bass"]["duck"] = {"law": KICK_DUCK_LAW, **duck, "depth_db": round(depth, 2),
-                                     "attack_ms": 5.0, "release_ms": 120.0}
+            # R121: only the bass's low band dips (kick_duck_band_v1), split
+            # just above the kick's fundamental; the key is the kick's own
+            # low end.  The crossover is measured here and written down.
+            audio_of = {t["id"]: s for s, t in zip(stems, tracks)}
+            keys = [audio_of[i] for i in duck["key_ids"] if i in audio_of]
+            loudest = max(keys, key=lambda s: float(np.mean(np.square(s.audio)))) if keys else None
+            f0 = dsp.kick_fundamental_hz(loudest.audio, loudest.sr) if loudest is not None else None
+            band = {"law": KICK_DUCK_BAND_LAW, "key_ids": duck["key_ids"],
+                    "key_lowpass_hz": KICK_DUCK_KEY_LOWPASS_HZ, "depth_db": round(depth, 2),
+                    "attack_ms": 5.0, "release_ms": 120.0,
+                    "crossover_hz": round(dsp.kick_crossover_hz(f0), 1)}
+            if f0 is not None:
+                band["kick_f0_hz"] = round(f0, 1)
+            buses["bass"]["duck"] = band
 
     # the vocal's weight and edge (parallel density, saturation, body /
     # presence / air), on the vocal bus whenever there is a vocal

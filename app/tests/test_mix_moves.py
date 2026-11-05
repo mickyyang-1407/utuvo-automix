@@ -148,7 +148,12 @@ def test_style_moves_are_written_into_the_plan():
     stems = _session()
     p = _plan(stems)
     duck = p["buses"]["bass"]["duck"]
-    assert duck["law"] == "kick_duck_v1" and duck["key_ids"] == ["Kick"] and duck["depth_db"] == 2.0
+    # R121: new plans duck only the bass's low band, split at 1.6 x the
+    # kick's fundamental, held to 90-130 Hz (the synthetic kick is a 55 Hz
+    # thump, found within a 2 Hz bin: 1.6 x 55 = 88 -> 90 Hz)
+    assert duck["law"] == "kick_duck_band_v1" and duck["key_ids"] == ["Kick"] and duck["depth_db"] == 2.0
+    assert abs(duck["kick_f0_hz"] - 55.0) <= 2.0 and duck["crossover_hz"] == 90.0
+    assert duck["key_lowpass_hz"] == 120.0
     # R116: half of R111's 0.35, the published "crushed copy about 15 dB under the kit"
     assert p["buses"]["drum"]["parallel"]["blend"] == .175
     delay = p["delay"]
@@ -174,7 +179,8 @@ def test_intensity_zero_writes_none():
 def test_a_whole_kit_keys_the_duck_on_its_low_end():
     p = _plan(_session(with_kick=False))
     duck = p["buses"]["bass"]["duck"]
-    assert duck["key_ids"] == ["Drums"] and duck["key_lowpass_hz"] == 150.0
+    assert duck["key_ids"] == ["Drums"] and duck["key_lowpass_hz"] == 120.0     # R121 (v1: 150)
+    assert 90.0 <= duck["crossover_hz"] <= 130.0
 
 
 def test_no_bass_no_duck_and_no_vocal_no_delay():
@@ -348,6 +354,8 @@ def test_moves_without_anything_to_act_on_are_refused():
         planner.validate(guitar)
     kit = copy.deepcopy(p)
     kit["tracks"][0]["role"] = "drums_full"
+    # a kick_duck_v1 plan (R111-R120) keyed on a whole kit must say where its kick is
+    kit["buses"]["bass"]["duck"] = {"law": "kick_duck_v1", "key_ids": ["Kick"], "depth_db": 2.0}
     with pytest.raises(planner.PlanError, match="key_lowpass_hz"):
         planner.validate(kit)
     no_bass = _plan(_session())

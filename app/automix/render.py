@@ -544,8 +544,45 @@ def _vocal_character(sig: np.ndarray, sr: int, spec: dict,
                  **{f"{k}_db": round(after[k] - before[k], 2) for k in bands}}
 
 
+#: R121: what a band-selective duck must keep (the planner writes the
+#: crossover 90-130 Hz; a hand-edited plan gets more room)
+KICK_DUCK_BAND_BOUNDS = {"crossover_hz": (60.0, 250.0), "key_lowpass_hz": (40.0, 500.0),
+                         "depth_db": (0.0, 12.0), "attack_ms": (0.5, 50.0), "release_ms": (10.0, 1000.0)}
+
+
+def _kick_duck_band(sig: np.ndarray, key: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dict]:
+    """R121: only the bass's low band dips under the kick.
+
+    The key is the kick's own low end (``key_lowpass_hz``), so a hi-hat in the
+    kick mic cannot open it; the bus is split at ``crossover_hz`` and only the
+    band below it is ducked -- out = bus - (1 - gain) * low band.  Above the
+    crossover the bass (its articulation, what a small speaker plays) is not
+    touched, and where the gain is 1 nothing is touched at all.
+    """
+    vals = {}
+    for k, (lo, hi) in KICK_DUCK_BAND_BOUNDS.items():
+        v = spec.get(k)
+        if k in ("attack_ms", "release_ms") and v is None:
+            v = 5.0 if k == "attack_ms" else 120.0
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not np.isfinite(v) or not lo <= v <= hi:
+            raise RenderError(f"kick duck {k} must be a number in {lo:g}..{hi:g}, got {v!r}")
+        vals[k] = float(v)
+    key = dsp.apply_eq(key, sr, [("lowpass", vals["key_lowpass_hz"], 0.0, 0.707)])
+    low = dsp.crossover_lowpass(sig, sr, vals["crossover_hz"])
+    low_ducked, gain = dsp.duck(low, key, sr, vals["depth_db"],
+                                attack_ms=vals["attack_ms"], release_ms=vals["release_ms"])
+    out = sig - (low - low_ducked) if low_ducked is not low else sig
+    gain_db = 20.0 * np.log10(np.maximum(gain, 1e-9))
+    hits = gain_db <= -0.5 * vals["depth_db"]
+    return out, {"law": "kick_duck_band_v1", "depth_db": vals["depth_db"], "crossover_hz": vals["crossover_hz"],
+                 "under_hits_db": round(float(np.mean(gain_db[hits])), 2) if hits.any() else 0.0,
+                 "time_ducked": round(float(np.mean(gain_db <= -0.5)), 3)}
+
+
 def _kick_duck(sig: np.ndarray, key: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dict]:
     """The bass bus dips under the kick; the receipt says by how much, measured."""
+    if spec.get("law") == "kick_duck_band_v1":
+        return _kick_duck_band(sig, key, sr, spec)
     if spec.get("law") != "kick_duck_v1":
         raise RenderError(f"unknown kick duck law {spec.get('law')!r}")
     if spec.get("key_lowpass_hz"):
@@ -1875,8 +1912,10 @@ def _move_rows(moves: dict) -> list[str]:
                     f"body {m['body_db']:+.1f}, presence {m['presence_db']:+.1f}, air {m['air_db']:+.1f} dB "
                     f"(parallel {m['parallel_blend']:.2f}, saturation {m['saturation']:.2f}) |")
     if (m := moves.get("kick_duck")):
+        band = (f" -- below {m['crossover_hz']:.0f} Hz only, the bass above it untouched"
+                if m.get("crossover_hz") else "")
         rows.append(f"| bass under the kick (sidechain) | {m['under_hits_db']:+.1f} dB on the hits "
-                    f"(up to -{m['depth_db']:.1f}), {100 * m['time_ducked']:.0f}% of the time |")
+                    f"(up to -{m['depth_db']:.1f}){band}, {100 * m['time_ducked']:.0f}% of the time |")
     if (m := moves.get("drum_parallel")):
         rows.append(f"| drum parallel compression | envelope crest {m['crest_before_db']:.1f} -> "
                     f"{m['crest_after_db']:.1f} dB (blend {m['blend']:.2f}) |")

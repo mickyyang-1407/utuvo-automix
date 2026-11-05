@@ -1680,3 +1680,69 @@ def _resonance_pass(x: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dic
                "deepest_mean_cut_hz": round(float(freqs[int(np.argmax(mean_cut))]), 0),
                "p95_frame_peak_cut_db": round(float(np.percentile(pk, 95)), 2)}
     return (y if ch > 1 else y[:, 0]), receipt
+
+
+# ------------------------------------------- R121 band-selective kick duck
+#: R121: under the kick only the bass's low band dips.  The bass bus is split
+#: at a crossover just above the kick's fundamental with zero-phase
+#: Linkwitz-Riley magnitudes (low |H| = 1 / (1 + (f/fc)^4), high = 1 - low),
+#: so the two bands add back to the input exactly: out = x - (1 - g) * low.
+#: Where the gain is 1 the bus is untouched to the bit; the bass's
+#: articulation above the crossover never moves.
+KICK_DUCK_BAND_LAWS = ("kick_duck_band_v1",)
+CROSSOVER_PAD_S = 1.0           # zeros either side: the low-pass rings, the FFT must not wrap
+KICK_F0_BAND_HZ = (40.0, 90.0)  # where a kick's fundamental lives
+KICK_CROSSOVER_RATIO = 1.6      # crossover = 1.6 x the kick's fundamental ...
+KICK_CROSSOVER_RANGE_HZ = (90.0, 130.0)   # ... held to 90-130 Hz (published bands: 40-100 Hz,
+                                          # the highest about 131 Hz)
+KICK_CROSSOVER_DEFAULT_HZ = 120.0
+
+
+def crossover_lowpass(x: np.ndarray, sr: int, fc: float) -> np.ndarray:
+    """The low band of a zero-phase LR4-magnitude crossover at ``fc``.
+
+    ``x - crossover_lowpass(x)`` is the high band; the two sum to ``x``.
+    """
+    n = x.shape[0]
+    if n == 0:
+        return x.copy()
+    pad = int(round(CROSSOVER_PAD_S * sr))
+    nf = _next_fast_len(n + 2 * pad)
+    shape = (nf,) + x.shape[1:]
+    buf = np.zeros(shape, dtype=np.float64)
+    buf[pad: pad + n] = x
+    f = np.fft.rfftfreq(nf, 1.0 / sr)
+    H = 1.0 / (1.0 + (f / float(fc)) ** 4)
+    X = np.fft.rfft(buf, nf, axis=0)
+    y = np.fft.irfft(X * (H[:, None] if x.ndim == 2 else H), nf, axis=0)
+    return y[pad: pad + n].astype(x.dtype, copy=False)
+
+
+def kick_fundamental_hz(x: np.ndarray, sr: int) -> float | None:
+    """The long-term spectral peak of a kick (or a whole kit) in 40-90 Hz.
+
+    ``None`` when the key has nothing there (silent, or no low end)."""
+    m = x.mean(axis=1) if x.ndim == 2 else x
+    m = np.asarray(m, dtype=np.float64)
+    seg = int(sr // 2)                       # 2 Hz bins, Hann, half overlap
+    if m.size < seg:
+        return None
+    win = np.hanning(seg)
+    hop = seg // 2
+    P = np.zeros(seg // 2 + 1)
+    for s in range(0, m.size - seg + 1, hop):
+        P += np.abs(np.fft.rfft(m[s: s + seg] * win)) ** 2
+    f = np.fft.rfftfreq(seg, 1.0 / sr)
+    lo, hi = KICK_F0_BAND_HZ
+    band = (f >= lo) & (f <= hi)
+    if not band.any() or P[band].max() <= 1e-12 * max(float(P.max()), 1e-30) or P.max() <= 0.0:
+        return None
+    return float(f[band][int(np.argmax(P[band]))])
+
+
+def kick_crossover_hz(f0: float | None) -> float:
+    """1.6 x the kick's fundamental, held to 90-130 Hz (120 Hz without one)."""
+    if f0 is None:
+        return KICK_CROSSOVER_DEFAULT_HZ
+    lo, hi = KICK_CROSSOVER_RANGE_HZ
+    return float(min(max(KICK_CROSSOVER_RATIO * f0, lo), hi))
