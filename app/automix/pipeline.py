@@ -234,6 +234,7 @@ def mix(
     source_balance_profile: str = "auto",
     reverb_amount: float | None = None,
     capture_groups: list | None = None,
+    group_trims: dict | None = None,
 ) -> tuple[dict, "object", dict]:
     """Return ``(plan, audio, report)``."""
     reverb_amount = planner._manual_reverb_amount(reverb_amount, optional=True)
@@ -266,6 +267,7 @@ def mix(
         balance_preserve=decision["balance_preserve"],
         _source_balance=decision,
         trims=trims,
+        group_trims=group_trims,
         pans=pans,
         target_lufs=target_lufs,
         true_peak_db=true_peak_db,
@@ -312,6 +314,7 @@ def mix(
         reverb_match=reverb_match,
         reverb_amount=reverb_amount,
         trims=trims,
+        group_trims=group_trims,
         pans=pans,
         target_lufs=target_lufs,
         true_peak_db=true_peak_db,

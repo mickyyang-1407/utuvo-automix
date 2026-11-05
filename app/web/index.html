@@ -239,6 +239,46 @@
   .summary .d{color:var(--dim);font-size:13px;margin-top:2px;overflow-wrap:anywhere}
   .summary button{flex:0 0 auto;padding:8px 16px;font-size:13.5px;border-radius:9px}
   .card{border-radius:14px;padding:20px 20px 18px;margin-bottom:18px;scroll-margin-top:20px}
+
+  /* R118: a quiet first screen -- three steps, the rest folded away */
+  .hero.empty .mixbar,.hero.empty .legend,.hero.empty .summary{display:none}
+  .hero.empty{padding-bottom:6px}
+  .styles .style .d{display:none}
+  .styles .style .n{min-height:0;margin:0}
+  .style-info:empty{display:none}
+  details.more{padding:0}
+  details.more>summary{list-style:none;cursor:pointer;display:flex;align-items:baseline;gap:12px;
+        padding:16px 20px;border-radius:14px}
+  details.more>summary::-webkit-details-marker{display:none}
+  details.more>summary::before{content:"\203A";color:var(--dim);font-size:18px;transition:transform .15s;display:inline-block}
+  details.more[open]>summary::before{transform:rotate(90deg)}
+  details.more .more-t{font-weight:600}
+  details.more .more-d{color:var(--dim);font-size:13px}
+  details.more .more-body{padding:0 20px 16px}
+  details.more .card.sub{background:transparent;border:0;border-top:1px solid var(--line);border-radius:0;
+        padding:16px 0 4px;margin:14px 0 0}
+  /* R118: "almost there?" -- one fader per group, right under the player */
+  .main-links{margin:10px 0 0}
+  .tune{margin-top:18px;padding:16px 18px;border:1px solid var(--line);border-radius:12px;background:var(--panel2)}
+  .tune-head{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;margin-bottom:12px}
+  .tune-head h3{font-size:15px;margin:0}
+  .tune-head span{color:var(--dim);font-size:13px}
+  .faders{display:flex;flex-direction:column;gap:10px}
+  .fader{display:grid;grid-template-columns:150px 1fr 72px;align-items:center;gap:14px}
+  .fader .fn{display:flex;align-items:center;gap:8px;font-size:14px}
+  .fader .fn i{width:9px;height:9px;border-radius:3px;display:inline-block}
+  .fader input[type=range]{width:100%;accent-color:#8b93a1;
+        background:linear-gradient(90deg,transparent calc(50% - 1px),var(--dim) calc(50% - 1px),var(--dim) calc(50% + 1px),transparent calc(50% + 1px)) no-repeat center/100% 12px}
+  .fader.moved input[type=range]{accent-color:var(--accent)}
+  footer{display:none}
+  .fader .fv{font-variant-numeric:tabular-nums;color:var(--dim);text-align:right;font-size:13.5px}
+  .fader.moved .fv{color:var(--ink);font-weight:600}
+  .tune-actions{display:flex;align-items:center;gap:10px;margin-top:14px}
+  .tune-actions .hint{flex:1;color:var(--warn);font-size:12.5px}
+  #tune-apply:not(:disabled){background:var(--accent);color:#0b1210;border-color:var(--accent);font-weight:600}
+  details.details{margin-top:16px}
+  details.details>summary{cursor:pointer;color:var(--dim);font-size:13.5px;padding:6px 0}
+  @media (max-width:640px){.fader{grid-template-columns:96px 1fr 60px;gap:10px}}
   .card h2{font-size:19px;text-transform:none;letter-spacing:0;color:var(--ink);font-weight:650;margin:0 0 16px}
   .actionbar{position:sticky;bottom:14px;z-index:5;margin:22px 0 0;display:flex;align-items:center;gap:12px;
              padding:9px 9px 9px 18px;background:#1a1e25;border:1px solid #333a45;border-radius:15px;
@@ -297,6 +337,54 @@
   </section>
 
   <div id="workspace">
+  <!-- R118: once there is a mix, it is the first thing on the page -->
+  <div class="card hide" id="result">
+    <h2>結果</h2>
+    <div class="metrics" id="metrics"></div>
+    <div class="ab">
+      <button id="abmix" class="on">混音後</button>
+      <button id="abraw">原始總和</button>
+      <button id="abprev" class="hide">上一個風格</button>
+      <button id="abref" class="hide">參考曲</button>
+    </div>
+    <canvas id="wave" width="1200" height="90"></canvas>
+    <audio id="player" controls preload="auto"></audio>
+    <div class="links main-links">
+      <a id="dlmix" href="#">下載 mix.wav</a>
+    </div>
+    <div class="tune" id="tune" role="group" aria-labelledby="tune-title">
+      <div class="tune-head"><h3 id="tune-title">差一點點？</h3><span>往右＝大聲一點、往左＝小聲一點，再按「套用並重新混音」。自動混音的其他決定都不變。</span></div>
+      <div class="faders" id="faders"></div>
+      <div class="tune-actions">
+        <span class="hint" id="tune-note" aria-live="polite"></span>
+        <button type="button" id="tune-reset">全部歸零</button>
+        <button type="button" id="tune-apply" disabled>套用並重新混音</button>
+      </div>
+    </div>
+    <details class="details" id="details">
+      <summary>細節：檢查結果、每一軌做了什麼、報告</summary>
+      <div class="hint" id="abnote"></div>
+      <div class="metrics" id="metrics-more"></div>
+      <div class="sections hide" id="exported"></div>
+      <div class="checks" id="checks"></div>
+      <div class="sections" id="sections"></div>
+      <div class="gscope hide" id="groupscope"></div>
+      <details class="notes hide" id="warnbox">
+        <summary id="warnsum"></summary>
+        <ul id="warns"></ul>
+      </details>
+      <details class="trackbox" id="trackbox">
+        <summary id="tracksum"></summary>
+        <div class="hint" id="trackhint"></div>
+        <table id="tracks"></table>
+      </details>
+      <div class="links">
+        <a id="dlplan" href="#" target="_blank">看 mixplan.json</a>
+        <a id="dlreport" href="#" target="_blank">看 report.md</a>
+      </div>
+    </details>
+  </div>
+
   <div class="card" id="sec-stems">
     <h2>1 · 分軌</h2>
     <div id="drop">
@@ -321,6 +409,12 @@
     <h2>2 · 風格</h2>
     <div class="styles" id="styles"></div>
     <div class="style-info" id="style-info" aria-live="polite"></div>
+  </div>
+
+  <details class="card more" id="more-options">
+    <summary><span class="more-t">更多選項</span><span class="more-d">響度、殘響量、匯出分軌、參考曲、專案存檔——不改也可以</span></summary>
+    <div class="more-body">
+      <div class="hint" id="style-basis"></div>
     <div class="row">
       <div class="ctl">
         <label>目標響度</label>
@@ -360,10 +454,9 @@
         <div class="hint" id="balance-intent">自動：同曲、對齊的參考曲能重建來源總和時保留 1.00；其餘維持 0.50。手動拉桿優先，不是音質判斷。</div>
       </div>
     </div>
-  </div>
-
-  <div class="card" id="sec-ref">
-    <h2>3 · 參考曲（選用）</h2>
+      <div class="more-sub" id="sec-ref-wrap">
+  <div class="card sub" id="sec-ref">
+    <h2>參考曲（選用）</h2>
     <div class="refdrop" id="refdrop">丟一首你喜歡的成品，讓它照那個方向混</div>
     <input id="refpicker" type="file" accept=".wav,.aif,.aiff,.flac,.mp3,.m4a,.ogg,.opus" class="hide">
     <div class="row">
@@ -374,43 +467,9 @@
     </div>
   </div>
 
-  <div class="hint" id="control-hint"></div>
-
-
-  <div class="card hide" id="result">
-    <h2>結果</h2>
-    <div class="metrics" id="metrics"></div>
-    <div class="ab">
-      <button id="abmix" class="on">混音後</button>
-      <button id="abraw">原始總和</button>
-      <button id="abprev" class="hide">上一個風格</button>
-      <button id="abref" class="hide">參考曲</button>
-    </div>
-    <div class="hint" id="abnote"></div>
-    <canvas id="wave" width="1200" height="90"></canvas>
-    <audio id="player" controls preload="auto"></audio>
-    <div class="sections hide" id="exported"></div>
-    <div class="checks" id="checks"></div>
-    <div class="sections" id="sections"></div>
-    <div class="gscope hide" id="groupscope"></div>
-    <details class="notes hide" id="warnbox">
-      <summary id="warnsum"></summary>
-      <ul id="warns"></ul>
-    </details>
-    <details class="trackbox" id="trackbox">
-      <summary id="tracksum"></summary>
-      <div class="hint" id="trackhint"></div>
-      <table id="tracks"></table>
-    </details>
-    <div class="links">
-      <a id="dlmix" href="#">下載 mix.wav</a>
-      <a id="dlplan" href="#" target="_blank">看 mixplan.json</a>
-      <a id="dlreport" href="#" target="_blank">看 report.md</a>
-    </div>
-  </div>
-
-  </div>
-  <div class="card" id="sec-project">
+      </div>
+      <div class="more-sub">
+  <div class="card sub" id="sec-project">
     <h2>本機專案</h2>
     <div class="row">
       <div class="ctl">
@@ -429,6 +488,15 @@
     <div class="hint" id="project-status" aria-live="polite"></div>
   </div>
 
+      </div>
+    </div>
+  </details>
+
+  <div class="hint" id="control-hint"></div>
+
+
+
+  </div>
   <div class="actionbar" id="actionbar">
     <span class="what" id="action-what"></span>
     <span class="sub" id="status"></span>
@@ -490,6 +558,14 @@ const STATIC_EN = {
   "只支援單聲道或左右相同的雙單聲道檔案；立體聲也可能只錄到同一個來源，但這個版本先不支援成群。":
     "Only mono or dual-mono (identical L/R) files are supported. A stereo file can also hold a single source, but this version cannot group stereo files yet.",
   "2 · 風格": "2 · Style",
+  "更多選項": "More options",
+  "響度、殘響量、匯出分軌、參考曲、專案存檔——不改也可以": "Loudness, reverb amount, stem export, reference, saving projects — fine to leave as they are",
+  "參考曲（選用）": "Reference (optional)",
+  "差一點點？": "Almost there?",
+  "往右＝大聲一點、往左＝小聲一點，再按「套用並重新混音」。自動混音的其他決定都不變。": "Right = a little louder, left = a little quieter, then press “Apply and mix again”. Everything else the automix decided stays as it is.",
+  "全部歸零": "Reset all",
+  "套用並重新混音": "Apply and mix again",
+  "細節：檢查結果、每一軌做了什麼、報告": "Details: checks, what each track got, the report",
   "目標響度": "Target loudness",
   "同時匯出處理後分軌（給 DAW，約": "Also export processed stems (for your DAW, about",
   "）": ")",
@@ -777,7 +853,10 @@ function showStyleIntent(savedStyle = null) {
   line(L("適用", "Good for"), (en && en.applicability) || intent.applicability ||
     (en && en.description) || item.description);
   line(L("限制", "Limits"), (en && en.caveat) || intent.caveat);
-  line(L("數值", "Values"), (en && en.numeric_basis) || intent.numeric_basis ||
+  // R118: the first screen stays short; where the numbers come from sits in
+  // "More options" (an open-able fold, so keyboard and touch reach it too)
+  const basis = $("style-basis");
+  if (basis) basis.textContent = L("風格數值：", "Style values: ") + ((en && en.numeric_basis) || intent.numeric_basis ||
     L("UTUVO自己調出來的起點數值，不是音質保證。", "Starting values tuned by UTUVO; not a guarantee of sound quality."));
 }
 async function loadStyles() {
@@ -2001,9 +2080,12 @@ function show(r, secs) {
       t.after_db == null ? "" : "dB", L(`套用參考前→後 · ${t.band_count} 個共同頻帶 · ${note}；不是音質分數`,
         `before → after applying the reference · ${t.band_count} shared bands · ${note}; not a quality score`), "reference-tone"]);
   }
-  $("metrics").innerHTML = cells.map(([k, v, u, s, extra = ""]) =>
+  // R118: three numbers up top (loudness, peak, dynamics); the rest under Details
+  const tile = ([k, v, u, s, extra = ""]) =>
     `<div class="m ${esc(extra)}"><div class="k">${esc(k)}</div><div class="v">${esc(v)} <small>${esc(u)}</small></div>
-     <div class="k" style="margin-top:4px">${esc(s)}</div></div>`).join("");
+     <div class="k" style="margin-top:4px">${esc(s)}</div></div>`;
+  $("metrics").innerHTML = cells.slice(0, 3).map(tile).join("");
+  $("metrics-more").innerHTML = cells.slice(3).map(tile).join("");
 
   const exp = $("exported");
   if (r.exported && r.exported.length) {
@@ -2149,6 +2231,7 @@ if (receipt && (receipt.groups || []).length) {
   $("tracks").innerHTML =
     `<tr><th>${L("軌道", "Track")}</th><th>${L("角色", "Role")}</th><th>${L("增益 dB", "Gain dB")}</th><th>pan</th><th>HPF Hz</th><th>reverb</th><th>${L("動態 dB", "Ride dB")}</th><th>${L("人聲讓位", "Vocal carve")}</th><th>${L("微調", "Trim")}</th></tr>${rows}`;
 
+  renderFaders(r);
   $("dlmix").href = `/api/session/${sessionId}/download/mix`;
   $("dlplan").href = `/api/session/${sessionId}/plan`;
   $("dlreport").href = `/api/session/${sessionId}/report`;
@@ -2242,7 +2325,10 @@ function refreshPrevButton(r) {
   if (!btn) return;
   const has = !!(r && r.prev_style);
   btn.classList.toggle("hide", !has);
-  if (has) btn.textContent = L(`上一個：${r.prev_style}`, `Previous: ${r.prev_style}`);
+  // R118: a readable name; the same style again means "before this change"
+  if (has) btn.textContent = r.prev_style === (r.style || {}).id
+    ? L("上一版", "Previous version")
+    : L(`上一個：${styleName(r.prev_style)}`, `Previous: ${styleName(r.prev_style)}`);
 }
 
 // ---------------------------------------------------------- the A/B switch
@@ -2534,6 +2620,8 @@ $("reverb-amount").addEventListener("input", e => $("reverb-amount-v").textConte
   $(id).addEventListener("input", () => { delete exactControls[id]; });
 });
 $("go").addEventListener("click", run);
+$("tune-apply").addEventListener("click", () => run());
+$("tune-reset").addEventListener("click", () => { setFaders({}); renderOverview(); });
 $("abmix").addEventListener("click", () => setAB("mix"));
 $("abprev").addEventListener("click", () => setAB("prev"));
 $("abraw").addEventListener("click", () => setAB("raw"));
@@ -2601,7 +2689,9 @@ function runBody() {
     blend: controlValue("blend", Number($("blend").value)),
     reverb_amount: controlValue("reverb-amount", Number($("reverb-amount").value) / 100),
     target_lufs: $("target").value ? Number($("target").value) : null,
-    export_stems: $("export").checked
+    export_stems: $("export").checked,
+    // R118: the group faders, always explicit (0 dB ones are left out)
+    group_trims: faderValues()
   });
 }
 
@@ -2662,6 +2752,8 @@ function applySavedControls(controls, result) {
   if (controls.reverb_amount != null) {
     seedReverb(controls.reverb_amount);
   }
+  // the faders come from the published result (renderFaders): that is what
+  // was applied, while the snapshot keeps what was asked for
   refreshGo();
 }
 
@@ -2769,6 +2861,98 @@ async function restore() {
 // The sidebar, the big number, the bar and the summary only *read* the state
 // the rest of the page keeps; they never change a control or a request.
 let lastResult = null, lastSeconds = null;
+/* ------------------------------------------------------- R118 group faders */
+// A few faders after the mix, for "almost there": each moves one group after
+// every automatic decision (the engine's buses.<group>.user_trim_db), its
+// reverb and delay with it.  "fx" is the space: the reverb/delay returns.
+const FADER_GROUPS = [
+  ["vocal", () => L("人聲", "Vocals"), "var(--vocals)"],
+  ["drum", () => L("鼓", "Drums"), "var(--drums)"],
+  // the same names as the stem families above (one name per group)
+  ["bass", () => L("貝斯", "Bass"), "var(--bass)"],
+  ["music", () => L("樂器", "Instruments"), "var(--music)"],
+  // the fx bus: the reverb/delay returns and any FX tracks (impacts, risers)
+  ["fx", () => L("效果與空間", "FX & space"), "var(--fx)"],
+];
+const FADER_RANGE = 6;  // dB each way on screen; the engine allows 12
+let faders = {};        // what the sliders say now
+let appliedFaders = {}; // what the mix on screen was made with
+function faderValues() {
+  const out = {};
+  for (const [g] of FADER_GROUPS) {
+    const v = Number(faders[g] || 0);
+    if (Math.abs(v) >= 0.05) out[g] = Math.round(v * 10) / 10;
+  }
+  return out;
+}
+const clampFader = v => Math.max(-FADER_RANGE, Math.min(FADER_RANGE, Number(v) || 0));
+function setFaders(values) {
+  faders = {};
+  // the screen's range is the range: a wider value (an API client may send up
+  // to 12 dB) is shown and sent as the nearest end
+  for (const [g, v] of Object.entries(values || {})) faders[g] = clampFader(v);
+  paintFaders();
+}
+function fmtDb(v) {
+  const n = Number(v) || 0;
+  if (Math.abs(n) < 0.05) return "0 dB";
+  return (n > 0 ? "+" : "\u2212") + Math.abs(n).toFixed(1) + " dB";
+}
+function sameFaders(a, b) {
+  return FADER_GROUPS.every(([g]) => Math.abs(Number(a[g] || 0) - Number(b[g] || 0)) < 0.05);
+}
+function paintFaders() {
+  const box = $("faders");
+  if (!box) return;
+  box.querySelectorAll(".fader").forEach(row => {
+    const g = row.dataset.group;
+    const v = Number(faders[g] || 0);
+    const input = row.querySelector("input");
+    input.value = String(v);
+    input.setAttribute("aria-valuetext", fmtDb(v));
+    row.querySelector(".fv").textContent = fmtDb(v);
+    row.classList.toggle("moved", Math.abs(v) >= 0.05);
+  });
+  const changed = !sameFaders(faders, appliedFaders);
+  $("tune-apply").disabled = !changed || !stems.length;
+  $("tune-reset").disabled = !Object.keys(faderValues()).length;
+  $("tune-note").textContent = changed ? L("還沒套用", "Not applied yet") : "";
+}
+function renderFaders(r) {
+  const box = $("faders");
+  // what this render was really made with is the truth on screen (a fader for
+  // a group the session lacks was asked for but never applied)
+  appliedFaders = {};
+  for (const [g, v] of Object.entries(r.group_trims || {})) appliedFaders[g] = clampFader(v);
+  faders = Object.assign({}, appliedFaders);
+  box.replaceChildren();
+  // a result from before the faders does not say which groups it has: no
+  // faders until it is mixed again, rather than faders that might do nothing
+  $("tune").classList.toggle("hide", !Array.isArray(r.groups));
+  const present = new Set(r.groups || []);
+  FADER_GROUPS.forEach(([g, label, color]) => {
+    // a group the session does not have gets no fader; FX & space always does
+    if (g !== "fx" && !present.has(g)) return;
+    const row = document.createElement("div");
+    row.className = "fader"; row.dataset.group = g;
+    const name = document.createElement("span");
+    name.className = "fn"; name.textContent = label();
+    const dot = document.createElement("i"); dot.style.background = color;
+    name.prepend(dot);
+    const input = document.createElement("input");
+    input.type = "range"; input.min = String(-FADER_RANGE); input.max = String(FADER_RANGE);
+    input.step = "0.5"; input.setAttribute("aria-label", label());
+    input.addEventListener("input", () => { faders[g] = Number(input.value); paintFaders(); renderOverview(); });
+    // a double click puts one fader back at 0
+    input.addEventListener("dblclick", () => { faders[g] = 0; paintFaders(); renderOverview(); });
+    const val = document.createElement("output"); val.className = "fv";
+    val.setAttribute("aria-live", "polite");
+    row.append(name, input, val);
+    box.appendChild(row);
+  });
+  paintFaders();
+}
+
 let mixedKey = null;  // the mix settings of the result on screen (export choice aside)
 function mixKey() {
   const b = JSON.parse(runBody());
@@ -2780,11 +2964,13 @@ const FAMILIES = [
   ["bass", () => L("貝斯", "Bass"), "var(--bass)"],
   ["vocals", () => L("人聲", "Vocals"), "var(--vocals)"],
   ["music", () => L("樂器", "Instruments"), "var(--music)"],
-  ["fx", () => L("效果與其他", "FX & other"), "var(--fx)"],
+  ["fx", () => L("效果", "FX"), "var(--fx)"],
 ];
 const ROLE_FAMILY = {kick: "drums", snare: "drums", hats: "drums", toms: "drums", cymbals: "drums", overheads: "drums", room: "drums", percussion: "drums",
   drums_full: "drums", bass: "bass", sub_808: "bass", lead_vocal: "vocals", backing_vocal: "vocals",
-  fx: "fx", other: "fx"};
+  // "other" is mixed with the instruments (the engine's music group), so it is
+  // counted, coloured and moved with them (R118)
+  fx: "fx", other: "music"};
 const familyOf = role => ROLE_FAMILY[role] || (role ? "music" : "fx");
 const ICONS = {
   overview: '<path d="M4 18V9M10 18V5M16 18v-7M22 18V8"/>',
@@ -2829,10 +3015,9 @@ function renderNav(stats) {
     [L("混音", "Mix")],
     ["sec-stems", "stems", L("分軌", "Stems"), stats.length ? String(stats.length) : "", "var(--music)"],
     ["sec-style", "style", L("風格", "Style"), styleName(), "var(--vocals)"],
-    ["sec-ref", "ref", L("參考曲", "Reference"), hasRef ? "✓" : L("無", "none"), "var(--bass)"],
     ["result", "result", L("結果", "Result"), resultShown && lastResult ? `${Number(lastResult.true_peak_db).toFixed(1).replace("-", "\u2212")} dBTP` : "—", "var(--accent)"],
-    [L("專案", "Projects")],
-    ["sec-project", "project", L("本機專案", "Local projects"), saved ? String(saved) : "", "var(--drums)"],
+    // R118: reference and projects live under "More options"
+    ["more-options", "project", L("更多選項", "More options"), (hasRef ? "✓ " : "") + (saved ? String(saved) : ""), "var(--drums)"],
   ];
   const active = list.dataset.active || "overview";
   const hadFocus = list.contains(document.activeElement) ? document.activeElement.dataset.target : null;
@@ -2868,6 +3053,8 @@ function renderNav(stats) {
 function renderOverview() {
   if (!$("hero-big")) return;
   const stats = stemStats();
+  // R118: before any stem arrives the page is just the three steps
+  $("overview").classList.toggle("empty", !stats.length);
   const included = stats.filter(x => !x.excluded);
   const resultShown = !$("result").classList.contains("hide") && lastResult;
   const stale = resultShown && ($("result").classList.contains("stale")
@@ -3032,7 +3219,7 @@ function initOverview() {
         });
       });
     }, {rootMargin: "-20% 0px -70% 0px"});
-    ["overview", "sec-stems", "sec-style", "sec-ref", "result", "sec-project"].forEach(id => $(id) && spy.observe($(id)));
+    ["overview", "result", "sec-stems", "sec-style", "more-options"].forEach(id => $(id) && spy.observe($(id)));
   }
   renderOverview();
 }

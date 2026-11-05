@@ -859,6 +859,12 @@
           "maxItems": 8,
           "default": []
         },
+        "user_trim_db": {
+          "description": "R118: the user's group fader (vocal, drum, bass, music, fx), in dB, applied after every automatic balance; the group's reverb and delay returns move with it (fx: the returns bus itself). Absent: 0 dB, as plans before R118 were rendered.",
+          "type": "number",
+          "minimum": -12,
+          "maximum": 12
+        },
         "comp_style_dial": {
           "description": "R117 receipt (drum_open_v1): what the style's compression dial alone would have written into comp (ratio, attack_ms; for the drum bus also threshold_db and threshold_offset_db) before new plans opened up the drums. The renderer does not read it.",
           "type": "object"

@@ -304,6 +304,9 @@ def requested_controls(payload: dict) -> dict:
         "target_lufs": _finite_number(payload.get("target_lufs")),
         "export_stems": payload.get("export_stems") is True,
         "reverb_amount": _finite_number(payload.get("reverb_amount"), 0.0, 1.0),
+        # R118: only when the user moved a group fader, so snapshots without
+        # faders stay exactly what they were
+        **({"group_trims": dict(payload["group_trims"])} if payload.get("group_trims") else {}),
     }
 
 
@@ -357,6 +360,14 @@ def clean_controls(raw) -> dict | None:
         export = False
     elif not isinstance(export, bool):
         return None
+    faders = {}
+    if raw.get("group_trims") is not None:
+        if not isinstance(raw["group_trims"], dict):
+            return None
+        try:
+            faders = planner._user_trims(raw["group_trims"])
+        except (planner.PlanError, TypeError, ValueError):
+            return None
     return {
         "style": style,
         "intensity": intensity,
@@ -366,6 +377,7 @@ def clean_controls(raw) -> dict | None:
         "target_lufs": target,
         "export_stems": export,
         "reverb_amount": reverb,
+        **({"group_trims": faders} if faders else {}),
     }
 
 
@@ -1307,6 +1319,7 @@ def _worker(payload: dict, conn) -> None:
             reference=ref,
             blend=payload["blend"],
             trims=trims,
+            group_trims=payload.get("group_trims") or None,
             pans=payload.get("pans") or {},
             target_lufs=payload.get("target_lufs"),
             true_peak_db=payload.get("true_peak_db"),
@@ -1471,6 +1484,10 @@ def _worker(payload: dict, conn) -> None:
                         {"check": name, "measured": value, "verdict": verdict}
                         for name, value, verdict in render._verdicts(plan, report)
                     ],
+                    # R118: the groups this mix has (one fader each, plus the
+                    # space fader) and where the user's faders were
+                    "groups": sorted({planner.ROLE_GROUP.get(t["role"], "music") for t in plan["tracks"]}),
+                    "group_trims": dict(report.get("user_trims") or {}),
                     "tracks": [
                         {
                             "id": t["id"],
@@ -2747,7 +2764,14 @@ class Handler(BaseHTTPRequestHandler):
                 req.get("reverb_amount", None if sess.reverb_amount == 1.0 else sess.reverb_amount),
                 optional=True,
             )
-        except (ValueError, planner.PlanError) as exc:
+            # R118: the group faders live in the published controls; a request
+            # without them keeps the ones of the current render
+            group_trims = dict((sess.controls or {}).get("group_trims") or {})
+            if "group_trims" in req:
+                if not isinstance(req["group_trims"], dict):
+                    raise ValueError("group_trims must be an object of group -> dB")
+                group_trims = planner._user_trims(req["group_trims"])
+        except (ValueError, TypeError, planner.PlanError) as exc:
             return self._error(400, str(exc))
         style = str(req.get("style") or "pop_2020s")
         if not sess.stem_names():
@@ -2780,6 +2804,7 @@ class Handler(BaseHTTPRequestHandler):
             "reference_path": sess.reference_path,
             "roles": dict(sess.roles),
             "trims": dict(sess.trims),
+            "group_trims": dict(group_trims),
             "muted": sorted(sess.muted),
             "pans": dict(sess.pans),
             "capture_groups": [dict(g) for g in sess.capture_groups],

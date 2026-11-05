@@ -1942,3 +1942,57 @@ def test_a_failed_run_leaves_the_last_successful_controls_alone(srv):
     # rejected by the planner inside the render (an impossible target)
     assert _render(base, sid, {"style": "rock", "target_lufs": -40})[0] == 400
     assert _state(base, sid)["controls"] == before
+
+
+# ------------------------------------------------------- R118 group faders
+
+def test_group_faders_reach_the_plan_and_are_kept_with_the_render(srv):
+    """R118: the few faders after a mix (vocal, drums, bass, other, space).
+    A run with them writes buses.<group>.user_trim_db, the controls snapshot
+    keeps them (only when set), a restart restores them, and a run without
+    the field keeps the current render's faders."""
+    from automix.server import Session
+    base, root = srv
+    sid = _new_session(base)
+    _two_stems(base, sid)
+    code, body = _render(base, sid, {"style": "pop_2020s", "group_trims": {"vocal": 2.0, "fx": -3.0}})
+    assert code == 200, body[:300]
+    code, plan_body, _ = _req(base, f"/api/session/{sid}/plan")
+    assert code == 200
+    plan = json.loads(plan_body)
+    assert plan["buses"]["vocal"]["user_trim_db"] == 2.0
+    assert plan["buses"]["fx"]["user_trim_db"] == -3.0
+    controls = _state(base, sid)["controls"]
+    assert controls["group_trims"] == {"vocal": 2.0, "fx": -3.0}
+    assert Session.load(root, sid).controls == controls
+    _restart(base, sid, root)
+    assert _state(base, sid)["controls"]["group_trims"] == {"vocal": 2.0, "fx": -3.0}
+    # a run that does not mention them keeps them
+    code, body = _render(base, sid, {"style": "pop_2020s"})
+    assert code == 200, body[:300]
+    assert _state(base, sid)["controls"]["group_trims"] == {"vocal": 2.0, "fx": -3.0}
+    # all back to 0: the snapshot has no faders again
+    code, body = _render(base, sid, {"style": "pop_2020s", "group_trims": {"vocal": 0, "fx": 0}})
+    assert code == 200, body[:300]
+    assert "group_trims" not in _state(base, sid)["controls"]
+    plan = json.loads(_req(base, f"/api/session/{sid}/plan")[1])
+    assert all("user_trim_db" not in b for b in plan["buses"].values())
+
+
+@pytest.mark.parametrize("bad", [{"vocal": 13}, {"master": 1}, [1, 2], {"vocal": "loud"}])
+def test_a_bad_group_fader_is_refused_before_rendering(srv, bad):
+    base, _ = srv
+    sid = _new_session(base)
+    _two_stems(base, sid)
+    code, body = _render(base, sid, {"style": "pop_2020s", "group_trims": bad})
+    assert code == 400, body[:300]
+    assert not _state(base, sid)["has_mix"]
+
+
+def test_a_damaged_saved_fader_drops_the_snapshot():
+    from automix.server import clean_controls
+    ok = {"style": "rock", "group_trims": {"vocal": 1.5}}
+    assert clean_controls(ok)["group_trims"] == {"vocal": 1.5}
+    assert "group_trims" not in clean_controls({"style": "rock"})
+    for bad in ({"vocal": 99}, {"nope": 1}, "loud"):
+        assert clean_controls({"style": "rock", "group_trims": bad}) is None

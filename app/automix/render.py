@@ -39,6 +39,9 @@ KIND_MAP = {
 }
 
 BUS_OF_ROLE = ROLE_GROUP
+#: R118: how the report names the user's group faders
+#: (fx is the whole fx bus: the reverb/delay returns and any FX tracks)
+USER_TRIM_LABEL = {"vocal": "vocal", "drum": "drums", "bass": "bass", "music": "instruments", "fx": "FX & space"}
 
 #: leave this much sample-peak headroom before the master chain
 PREMASTER_HEADROOM_DB = -6.0
@@ -568,6 +571,21 @@ def _send_followers(bus_specs: dict) -> set:
     return out
 
 
+def _user_trims(bus_specs: dict) -> dict:
+    """R118: the user's group faders in the plan (buses.<g>.user_trim_db)."""
+    out = {}
+    for name in ("vocal", "drum", "bass", "music", "fx"):
+        v = (bus_specs.get(name) or {}).get("user_trim_db")
+        if v is None:
+            continue
+        v = float(v)
+        if not np.isfinite(v) or abs(v) > 12.0:
+            raise RenderError(f"buses.{name}.user_trim_db must be between -12 and 12 dB")
+        if v != 0.0:
+            out[name] = v
+    return out
+
+
 def _join_followed(buses: dict, followed: dict, fader_db: dict, n: int) -> dict:
     """Add the followed returns to the fx bus at their bus's balance move
     (R117, post_fader_v1) and return the receipt.  A bus the balance did not
@@ -686,6 +704,9 @@ def render(
     # be scaled by the balance gain once it is known.  Plans without the field
     # have no such bus and every send goes into the one sum, as before.
     follow = _send_followers(plan.get("buses") or {})
+    # R118: a group the user moved carries its sends along too
+    user_trims = _user_trims(plan.get("buses") or {})
+    follow |= {g for g in user_trims if g != "fx"}
     reverb_in_of: dict[str, np.ndarray] = {}
     delay_in_of: dict[str, np.ndarray] = {}
 
@@ -1032,6 +1053,14 @@ def render(
                                    fader_db=fader_db)
     del meter
 
+    # R118: the user's group faders, after every automatic balance (each one
+    # moves its group's followed reverb/delay with it; fx is the returns bus
+    # itself and is moved where it joins the mix)
+    for name, value in user_trims.items():
+        if name != "fx" and name in buses:
+            buses[name] = buses[name] * dsp.db_to_lin(value)
+            fader_db[name] = fader_db.get(name, 0.0) + value
+
     # R117: the followed returns join the fx bus at their bus's fader
     send_follow = None
     if followed_wet:
@@ -1046,6 +1075,8 @@ def render(
         mix += sig
         del sig
     if wet_bus is not None:
+        if "fx" in user_trims:
+            wet_bus = wet_bus * dsp.db_to_lin(user_trims["fx"])
         mix += wet_bus
     del wet_bus
     # Preserve the post-fx-pop report exactly, then release completed buses
@@ -1189,6 +1220,8 @@ def render(
         moves["vocal_delay"] = delay_report
     if send_follow is not None:
         report["send_follow"] = send_follow
+    if user_trims:
+        report["user_trims"] = dict(user_trims)
     report["limiter"] = limiting
     if "saturation_law" in plan:
         report["saturation_law"] = sat_law
@@ -1510,6 +1543,12 @@ def write_report(path: str, plan: dict, report: dict, stems: list) -> None:
             f"(target {pb['target_db']:+.1f}; was {pb['measured_db']:+.1f}, moved {pb['applied_db']:+.1f} dB) |"
             for name, pb in (report.get("part_balance") or {}).items()
         ],
+        *(
+            ["| your faders (after the automatic balance) | "
+             + ", ".join(f"{USER_TRIM_LABEL[k]} {v:+.1f} dB" for k, v in report["user_trims"].items()) + " |"]
+            if report.get("user_trims")
+            else []
+        ),
         *(
             [f"| saturation | {report['saturation_law']}: follows each passage's level, 4x oversampled |"]
             if report.get("saturation_law") == "env_tanh_os4_v1"

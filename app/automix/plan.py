@@ -95,6 +95,26 @@ DRUM_TRACK_MIN_ATTACK_MS = 25.0
 #: the receipt each changed drum compressor carries: what the style's dial
 #: alone would have written (the renderer does not read it)
 DRUM_OPEN_LAW = "drum_open_v1"
+#: R118: the few faders a user gets after the mix ("vocal a little louder"):
+#: one dB offset per group, applied by the renderer after every automatic
+#: balance, the group's reverb and delay moving with it.  Absent = 0 dB, so
+#: plans without them render as before.
+USER_TRIM_GROUPS = ("vocal", "drum", "bass", "music", "fx")
+USER_TRIM_MAX_DB = 12.0
+
+
+def _user_trims(group_trims: dict | None) -> dict:
+    """The user's group faders, checked: known groups, finite, within the limit."""
+    out = {}
+    for name, value in (group_trims or {}).items():
+        if name not in USER_TRIM_GROUPS:
+            raise PlanError(f"no fader for group {name!r} (groups: {', '.join(USER_TRIM_GROUPS)})")
+        v = float(value)
+        if not math.isfinite(v) or abs(v) > USER_TRIM_MAX_DB:
+            raise PlanError(f"group fader {name}: {value!r} is not between -{USER_TRIM_MAX_DB:g} and +{USER_TRIM_MAX_DB:g} dB")
+        if abs(v) >= 0.05:
+            out[name] = round(v, 1)
+    return out
 
 
 def _open_drum_track_comp(spec: dict) -> tuple[dict, dict]:
@@ -1170,6 +1190,7 @@ def build_plan(
     capture_groups: list | None = None,
     _source_balance: dict | None = None,
     reverb_amount: float | None = None,
+    group_trims: dict | None = None,
 ) -> dict:
     """Build a MixPlan.
 
@@ -2017,6 +2038,14 @@ def build_plan(
 
     sr = stems[0].sr
     duration = max(s.duration for s in stems)
+
+    # R118: the user's group faders, on top of every automatic decision
+    present = {ROLE_GROUP.get(t["role"], "music") for t in tracks}
+    for name, value in _user_trims(group_trims).items():
+        if name == "fx" or name in present:
+            buses[name]["user_trim_db"] = value
+        else:
+            warnings.append(f"group fader {name} {value:+.1f} dB ignored: the session has no {name} track")
 
     plan = {
         "schema_version": SCHEMA_VERSION,

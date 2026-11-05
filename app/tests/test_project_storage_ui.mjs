@@ -174,7 +174,9 @@ for (const savedDraft of [draft,null]) {
     project_name:'restored',reverb_amount:0.5};
   h.setFetch(async path=>response(path.endsWith('/state') ? state : {target_lufs:-20}));
   await h.test.restore();
-  assert.deepEqual(JSON.parse(h.test.runBody()), savedDraft || old);
+  // R118: every mix request carries the group faders explicitly ({} = all at
+  // 0 dB), so "Reset all" really resets them on the server
+  assert.deepEqual(JSON.parse(h.test.runBody()), {...(savedDraft || old), group_trims:{}});
   assert.equal(h.get('project-name').value,'restored');
   if (savedDraft) assert.match(h.get('control-hint').textContent,T.draft);
   else assert.match(h.get('control-hint').textContent,T.restored);
