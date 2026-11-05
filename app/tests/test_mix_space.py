@@ -165,7 +165,10 @@ def test_a_band_that_starts_far_too_loud_still_reaches_its_targets():
     stems = []
     def add(name, a):
         stems.append(analyze.Stem(name=name, path=name, sr=SR, audio=np.stack([a, a], 1).astype(np.float32)))
-    add("Kick.wav", .6 * kick)
+    # R117: drums compressed less come out about 2 dB louder in the band, so
+    # the kick that needed 10 dB now needs 12 at 0.6; at 0.35 it needs ~11
+    # (still well past the old 6 dB limit, which is what this test is about)
+    add("Kick.wav", .35 * kick)
     add("Bass.wav", .12 * np.sin(2 * np.pi * 55 * t))
     add("Keys.wav", .02 * np.sin(2 * np.pi * 330 * t) + .005 * rng.standard_normal(t.size))
     analyze.detect_roles(stems)
@@ -221,8 +224,8 @@ def test_the_balance_is_measured_through_the_master_eq():
 
     seen = {}
     real = render._vocal_balance
-    def spy(buses, spec, sr, warnings, meter=None):
-        out = real(buses, spec, sr, warnings, meter=meter)
+    def spy(buses, spec, sr, warnings, meter=None, **kw):
+        out = real(buses, spec, sr, warnings, meter=meter, **kw)
         bands = render._eq_bands(p["buses"]["master"]["eq"])
         eq = {k: dsp.apply_eq(v, sr, bands) for k, v in buses.items() if k != "fx"}
         for n in ("drum", "bass"):
@@ -290,13 +293,13 @@ def test_when_the_cut_limit_binds_the_metered_copies_follow_the_buses():
         p["buses"][name]["balance"]["max_cut_db"] = 2.0
     seen = {}
     real = render._vocal_balance
-    def spy(buses, spec, sr, warnings, meter=None):
+    def spy(buses, spec, sr, warnings, meter=None, **kw):
         bands = render._eq_bands(p["buses"]["master"]["eq"])
         eq = {k: dsp.apply_eq(v, sr, bands) for k, v in buses.items() if k != "fx"}
         for n in ("drum", "bass"):
             seen[n] = dsp.vocal_to_rest_db(eq[n], sum(v for k, v in eq.items() if k not in (n, "vocal")), sr)[0]
             seen[n + "_meter"] = dsp.vocal_to_rest_db(meter[n], sum(v for k, v in meter.items() if k not in (n, "vocal")), sr)[0]
-        return real(buses, spec, sr, warnings, meter=meter)
+        return real(buses, spec, sr, warnings, meter=meter, **kw)
     render._vocal_balance = spy
     try:
         _, rep = render.render(stems, p)

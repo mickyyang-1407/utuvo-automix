@@ -170,7 +170,8 @@ def _without_ratio_law(plan: dict) -> dict:
     block to the vocal bus, R111 the style's mixing moves (bass duck, drum
     parallel compression, vocal delay and its sends) and R114 the vocal
     character, drum/bass balance, release limiter, plate_v2 reverb and side
-    air; R25 plans predate all of them.  A plan without them still renders the R25 way, so they are set
+    air (R116 tempo-locked reverb, balance meter; R117 send law, saturation
+    law, drum compression); R25 plans predate all of them.  A plan without them still renders the R25 way, so they are set
     aside here."""
     plan = json.loads(json.dumps(plan))
     for block in plan.get("tracks", []) + list(plan.get("buses", {}).values()):
@@ -205,6 +206,16 @@ def _without_ratio_law(plan: dict) -> dict:
     plan.pop("delay", None)
     for track in plan.get("tracks", []):
         (track.get("sends") or {}).pop("delay", None)
+    # R117: the saturation law, and the drum compressors back to what the
+    # style's dial alone wrote (each changed one has comp_style_dial beside it;
+    # the balance send law went with the balance blocks above)
+    plan.pop("saturation_law", None)
+    for block in plan.get("tracks", []) + list(plan.get("buses", {}).values()):
+        was = block.pop("comp_style_dial", None) if isinstance(block, dict) else None
+        if was:
+            for key in ("ratio", "attack_ms", "threshold_db", "threshold_offset_db"):
+                if key in was:
+                    block["comp"][key] = was[key]
     if "warnings" in plan:
         plan["warnings"] = [w for w in plan["warnings"] if not w.startswith("vocal delay:")]
     return plan

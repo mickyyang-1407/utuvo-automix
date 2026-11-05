@@ -103,17 +103,28 @@ SR = 48000
 #: .1757, presence .0228 -> .0249, air .0127 -> .0099; width .159 -> .178;
 #: correlation .956 -> .940; LUFS -10.56 -> -10.54; crest 11.40.  Intended.
 #: Saved plans render as before (R25 comparison, replay of R94/R104/R115).
+#: 2026-11-05 (R117): the drum, bass and vocal reverb/delay sends follow
+#: their balance moves (post_fader_v1: the demo's drums come down 8.0 dB
+#: and their wide plate with them, the vocal 3.6 dB), saturation follows
+#: each passage's level at 4x (env_tanh_os4_v1; the old law also lifted the
+#: saturated tracks' level), and the drums are compressed less (bus
+#: threshold 6 dB above its average, at most 2:1, 30 ms attack; close mics
+#: half the ratio, 25 ms attack).  Less wide plate: width .178 -> .145,
+#: correlation .940 -> .961; low .2470 -> .2587, mid .1757 -> .1676,
+#: presence .0249 -> .0233, air .0099 -> .0080; LUFS -10.54 -> -10.57,
+#: crest 11.40 -> 11.36.  Intended.  Saved plans render as before (replay of
+#: R94/R104/R115/R116).
 EXPECTED = {
-    "lufs": -10.54,
-    "crest_db": 11.40,
-    "width": 0.178,
-    "correlation": 0.940,
+    "lufs": -10.57,
+    "crest_db": 11.36,
+    "width": 0.145,
+    "correlation": 0.961,
     "band_energy": {
-        "low": 0.2470,
-        "low_mid": 0.5353,
-        "mid": 0.1757,
-        "presence": 0.0249,
-        "air": 0.0099,
+        "low": 0.2587,
+        "low_mid": 0.5365,
+        "mid": 0.1676,
+        "presence": 0.0233,
+        "air": 0.0080,
     },
 }
 

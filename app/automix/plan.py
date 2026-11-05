@@ -63,6 +63,48 @@ PART_BALANCE_MAX_CUT_DB = 12.0
 #: what the listener hears and what the professional medians were measured
 #: on (render.BALANCE_METER_LAW); plans without it measured the bare buses
 BALANCE_METER_LAW = "master_eq_v1"
+#: R117: the reverb and delay sends of a balanced bus follow its balance
+#: move, as a post-fader send does.  Before, only the dry bus moved: a vocal
+#: pulled down 6 dB kept its reverb where it was and came out 6 dB wetter, and drums cut
+#: 12 dB kept their plate.  Plans without the field render as before.
+BALANCE_SEND_LAW = "post_fader_v1"
+#: R117: how tracks and buses saturate (dsp.SATURATION_LAWS).  The old law
+#: normalised the tanh to each track's single largest peak at the sample
+#: rate: a gain of up to k/tanh(k) below that peak (it also lifted every
+#: saturated track's level: drums +2.75 dB at pop's drive) with harmonics
+#: folding back.  Measured on 12 professional stems the two laws move density
+#: and brightness alike; the new one
+#: keeps the level contour between passages and does not fold back.
+SATURATION_LAW = "env_tanh_os4_v1"
+#: R117: drums that still move.  Measured on 46 MedleyDB songs the drum bus
+#: came out with 7-9 dB of level spread (p90-p10 of 50 ms windows) against
+#: 16.6 in the professional stems; taking out one stage at a time, the bus
+#: compressor cost 3.7 dB of it and the close-mic compressors 1.9.  The bus threshold sat 3 dB under the
+#: bus's average level, so every hit was pushed 6-9 dB down -- the published
+#: range for drum-bus glue is 2-5 dB at 2:1-4:1 with an attack that lets the
+#: hit through.  New plans:
+#: the drum bus threshold sits above the average (hits get a few dB), a
+#: 2:1 ceiling and a slower attack; close drum mics compress at half the
+#: ratio with an attack that lets the transient through.  These are plain
+#: compressor numbers in the plan, so older plans render as they were.
+DRUM_BUS_THRESHOLD_OFFSET_DB = 6.0
+DRUM_BUS_MAX_RATIO = 2.0
+DRUM_BUS_MIN_ATTACK_MS = 30.0
+DRUM_TRACK_RATIO_SCALE = 0.5
+DRUM_TRACK_MIN_ATTACK_MS = 25.0
+#: the receipt each changed drum compressor carries: what the style's dial
+#: alone would have written (the renderer does not read it)
+DRUM_OPEN_LAW = "drum_open_v1"
+
+
+def _open_drum_track_comp(spec: dict) -> tuple[dict, dict]:
+    """R117: a close drum mic's compressor at half the ratio, slower attack.
+    Returns the compressor and the receipt (``comp_style_dial``, kept next to
+    the compressor: the compressor block holds only what the renderer reads)."""
+    was = {"law": DRUM_OPEN_LAW, "ratio": spec["ratio"], "attack_ms": spec["attack_ms"]}
+    spec["ratio"] = round(1.0 + (float(spec["ratio"]) - 1.0) * DRUM_TRACK_RATIO_SCALE, 2)
+    spec["attack_ms"] = max(float(spec["attack_ms"]), DRUM_TRACK_MIN_ATTACK_MS)
+    return spec, was
 
 #: Three mixing moves a style can ask for (preset "techniques"); each is a
 #: block in the plan, so a plan written before they existed has none of them
@@ -1333,6 +1375,9 @@ def build_plan(
             amount = capped
 
         comp_block = _comp_params(group, amount) if amount > 0 else None
+        comp_dial = None
+        if comp_block and group == "drum":
+            comp_block, comp_dial = _open_drum_track_comp(comp_block)
 
         saturation = float(sat.get(group, sat.get(s.role, 0.0))) * intensity
         if saturation > max_sat:
@@ -1414,6 +1459,8 @@ def build_plan(
             )
         if comp_block:
             track["comp"] = comp_block
+        if comp_dial:
+            track["comp_style_dial"] = comp_dial
         hum = float(s.metrics.get("hum_hz", 0.0))
         if hum and s.role not in HUM_EXEMPT:
             # A sustained bass note at 50 Hz is indistinguishable from hum on
@@ -1739,6 +1786,11 @@ def build_plan(
         bus = {"width": 1.0}
         if amt > 0:
             spec = _comp_params("bus", amt)
+            if group == "drum":
+                was = {"law": DRUM_OPEN_LAW, "ratio": spec["ratio"], "attack_ms": spec["attack_ms"],
+                       "threshold_db": spec["threshold_db"]}
+                spec["ratio"] = min(float(spec["ratio"]), DRUM_BUS_MAX_RATIO)
+                spec["attack_ms"] = max(float(spec["attack_ms"]), DRUM_BUS_MIN_ATTACK_MS)
             level = _bus_level_db(group)
             if level is not None:
                 # The estimate is only a hint.  The renderer places the threshold
@@ -1746,6 +1798,12 @@ def build_plan(
                 # loudness is a poor guess of a real bus's peaks, and the first
                 # attempt left bus glue at -0.04 dB of gain reduction.
                 offset = round(-1.0 - 6.0 * amt, 1)
+                if group == "drum":
+                    # R117: glue, not a lid (DRUM_BUS_THRESHOLD_OFFSET_DB)
+                    was["threshold_offset_db"] = offset
+                    was["threshold_db"] = min(COMP_THRESHOLD_DB_RANGE[1],
+                                              max(COMP_THRESHOLD_DB_RANGE[0], round(level + offset, 1)))
+                    offset = DRUM_BUS_THRESHOLD_OFFSET_DB
                 spec["threshold_offset_db"] = offset
                 # The estimate is bounded to the schema's legal range so a
                 # loud bus (two protected guitar mics at a legal +18 dB trim
@@ -1755,6 +1813,8 @@ def build_plan(
                 low, high = COMP_THRESHOLD_DB_RANGE
                 spec["threshold_db"] = min(high, max(low, round(level + offset, 1)))
             bus["comp"] = spec
+            if group == "drum":
+                bus["comp_style_dial"] = was
         if group in ("music",):
             bus["saturation"] = round(min(float(sat.get("music", 0.0)) * 0.5, max_sat), 3)
         return bus
@@ -1771,6 +1831,7 @@ def build_plan(
             "max_cut_db": VOCAL_BALANCE_MAX_CUT_DB,
             "style_db": round(style_db, 2),
             "meter": BALANCE_METER_LAW,
+            "sends": BALANCE_SEND_LAW,
         }
         # The source's own vocal balance only counts when somebody vouched
         # for it (proven stems, a declared profile, an explicit amount).  An
@@ -1796,7 +1857,7 @@ def build_plan(
                 target = median + float(tech.get(key, 0.0)) * float(intensity)
                 buses[group]["balance"] = {"law": PART_BALANCE_LAW, "target_db": round(target, 2),
                                            "max_boost_db": PART_BALANCE_MAX_DB, "max_cut_db": PART_BALANCE_MAX_CUT_DB,
-                                           "meter": BALANCE_METER_LAW}
+                                           "meter": BALANCE_METER_LAW, "sends": BALANCE_SEND_LAW}
     # one tempo estimate for the delay and the reverb timing
     tempo_memo: dict = {}
 
@@ -2012,6 +2073,9 @@ def build_plan(
             "ir_law": "plate_v2",
         },
         "warnings": warnings,
+        # R117: saturation follows each passage's own level, oversampled
+        # (dsp.SATURATION_LAWS); plans without it saturate as before
+        "saturation_law": SATURATION_LAW,
     }
     if delay_block is not None:
         plan["delay"] = delay_block

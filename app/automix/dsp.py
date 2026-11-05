@@ -287,8 +287,106 @@ def deess(
     return (low + high * gain).astype(x.dtype)
 
 
-def saturate(x: np.ndarray, drive: float) -> np.ndarray:
-    """tanh saturation with level compensation. drive 0..1.
+#: R117: how ``saturate`` shapes the signal.
+#:   peak_tanh_v1    -- the curve is normalised to the track's single largest
+#:                      peak and runs at the sample rate (plans without
+#:                      ``saturation_law``).  Below that peak the curve is a
+#:                      gain of up to k/tanh(k) (+3.4 dB at drive 0.25): quiet
+#:                      passages come up against the loud ones, so every
+#:                      saturated track and bus is also a soft peak
+#:                      compressor, and the harmonics above Nyquist fold back.
+#:   env_tanh_os4_v1 -- the same tanh, normalised to the signal's own
+#:                      envelope (a 30 ms peak hold) and run at 4x the sample
+#:                      rate: the level contour between passages is kept
+#:                      (within each cycle the waveform is shaped, as by any
+#:                      saturator), every passage gets the drive's harmonics,
+#:                      and harmonics above the original Nyquist are filtered
+#:                      out instead of folding back (what still folds from
+#:                      beyond 4x is tiny: -87 dB on a 15 kHz tone at 0.35).
+#:                      Level: the RMS is kept.  A steady full-scale sine gets
+#:                      the same harmonics as with peak_tanh_v1.
+SATURATION_LAWS = ("peak_tanh_v1", "env_tanh_os4_v1")
+SAT_ENV_HOLD_S = 0.030
+SAT_OVERSAMPLE = 4
+
+
+def saturate(x: np.ndarray, drive: float, law: str = "peak_tanh_v1", sr: int | None = None) -> np.ndarray:
+    """Saturation with level compensation, drive 0..1, by ``law`` (SATURATION_LAWS)."""
+    if law == "env_tanh_os4_v1":
+        if sr is None:
+            raise ValueError("env_tanh_os4_v1 needs the sample rate")
+        return _saturate_env_os(x, drive, int(sr))
+    if law != "peak_tanh_v1":
+        raise ValueError(f"unknown saturation law {law!r}")
+    return _saturate_peak(x, drive)
+
+
+def _sat_envelope(mag: np.ndarray, sr: int) -> np.ndarray:
+    """A smooth peak envelope of ``mag`` (1x rate): the largest value within
+    SAT_ENV_HOLD_S around each sample (so it holds over a 33 Hz cycle and
+    does not follow the waveform), smoothed over the same span."""
+    n = mag.size
+    dec = max(1, sr // 1000)  # 1 ms cells
+    cells = (n + dec - 1) // dec
+    padded = np.zeros(cells * dec, dtype=np.float64)
+    padded[:n] = mag
+    cell = padded.reshape(-1, dec).max(axis=1)
+    span = max(3, int(round(SAT_ENV_HOLD_S * 1000)))
+    env = _box_smooth(_rolling_max(cell, span), span)
+    centres = (np.arange(cells) + 0.5) * dec
+    return np.interp(np.arange(n), centres, env)
+
+
+def _saturate_env_os(x: np.ndarray, drive: float, sr: int, block_s: float = 8.0) -> np.ndarray:
+    """Law env_tanh_os4_v1 (see SATURATION_LAWS)."""
+    if drive <= 1e-3:
+        return x
+    squeeze = x.ndim == 1
+    xs = x[:, None] if squeeze else x
+    n = xs.shape[0]
+    if n == 0 or not np.any(xs):
+        return x
+    k = 5.0 * float(np.clip(drive, 0.0, 1.0))
+    norm = float(np.tanh(k))
+    env = _sat_envelope(np.max(np.abs(xs), axis=1).astype(np.float64), sr)
+    os_ = SAT_OVERSAMPLE
+    out = np.empty(xs.shape, dtype=np.float64)
+    bs = max(1, int(block_s * sr))
+    # FFT resampling rings at a segment's cut ends; a quarter second of
+    # context on each side keeps that out of the part that is kept
+    pad = min(n, int(0.25 * sr))
+    start = 0
+    while start < n:
+        lo, hi = max(0, start - pad), min(n, start + bs + pad)
+        end = min(n, start + bs)
+        seg = xs[lo:hi].astype(np.float64)
+        if not np.any(seg):
+            out[start:end] = 0.0
+            start += bs
+            continue
+        up = resample_fft(seg, sr, sr * os_)
+        e = np.interp(np.arange(up.shape[0]) / os_, np.arange(seg.shape[0]), env[lo:hi])
+        # never below the signal itself, so |u| <= 1 and no sample is pushed
+        # past its own envelope
+        np.maximum(e, np.max(np.abs(up), axis=1), out=e)
+        np.maximum(e, 1e-9, out=e)
+        y = np.tanh(k * up / e[:, None]) * (e[:, None] / norm)
+        del up, e
+        down = resample_fft(y, sr * os_, sr)
+        del y
+        out[start:end] = down[start - lo:end - lo]
+        del down
+        start += bs
+    rin = float(np.sqrt(np.mean(xs.astype(np.float64) ** 2)))
+    rout = float(np.sqrt(np.mean(out ** 2)))
+    if rout > EPS:
+        out *= rin / rout
+    out = out.astype(x.dtype, copy=False)
+    return out[:, 0] if squeeze else out
+
+
+def _saturate_peak(x: np.ndarray, drive: float) -> np.ndarray:
+    """tanh saturation with level compensation. drive 0..1 (peak_tanh_v1).
 
     The curve is normalised to the signal's own peak, so the *shape* of the
     drive curve is what decides how much harmonic distortion a low setting

@@ -1479,7 +1479,12 @@ def estimate_memory_mb(stems: "list[Stem]") -> float:
     # R116: the balance meter holds a master-EQ'd copy of the four dry buses
     # (float64) and filters one at a time (a complex128 spectrum)
     meter = n * ch * (4 * 8 + 16)
-    return (len(stems) * bytes_per_stem * 4.2 + meter) / 1e6
+    # R117: post-fader sends keep the vocal, drum and bass send sums apart
+    # (float64): at the reverb step up to four send sums, the delay sums,
+    # four returns and their pre-fader total are alive at once, and the three
+    # followed returns stay until the balance step has moved the buses
+    follow = n * ch * 8 * 10
+    return (len(stems) * bytes_per_stem * 4.2 + meter + follow) / 1e6
 
 
 def check_memory(stems: "list[Stem]", budget_mb: float | None = None) -> None:

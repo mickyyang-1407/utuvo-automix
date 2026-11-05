@@ -8,7 +8,7 @@ UTUVO Automix is a playful automatic mixer. It reads stems or multitracks, guess
 
 - Runs locally; no audio leaves your machine.
 - 14 styles: Acoustic, Ambient/Space, Cinematic, Funk/Disco, Heavy Rock/Metal, House/Dance, Indie Pop, Jazz/Natural, Lo-fi, Pop 2020s, Reggae/Groove, R&B/Soul, Rock, Trap/Hip-Hop. Every style's numbers are UTUVO's own starting points — nobody's recipe and no quality guarantee.
-- Mixing moves chosen by the style: the bass ducks under the kick (sidechain), parallel compression on the drums, a vocal delay locked to the song's tempo (a slapback when the tempo is not clear), the reverb's pre-delay and decay locked to the tempo too, and the vocal, drums and bass each checked against the rest of the mix as you hear it (through the master EQ). The report says what each one measurably did.
+- Mixing moves chosen by the style: the bass ducks under the kick (sidechain), parallel compression on the drums, a vocal delay locked to the song's tempo (a slapback when the tempo is not clear), the reverb's pre-delay and decay locked to the tempo too, and the vocal, drums and bass each checked against the rest of the mix as you hear it (through the master EQ) — when that check moves one of them, its reverb and delay move with it, like a post-fader send. Saturation is oversampled and follows each passage's own level, so it adds harmonics (each cycle is still shaped, as by any saturator) without pulling the quiet passages up against the loud ones. The report says what each one measurably did.
 - Loudness-matched A/B between the mix and the raw sum, so louder never wins by accident.
 - Every mix saves an editable `mixplan.json`; the same plan always renders the same audio.
 - Optional processed-stem export for your DAW (without bus/master processing).
@@ -50,7 +50,7 @@ UTUVO Automix是一個好玩的自動混音工具：讀你的stems或多軌，�
 
 - 全部在本機執行，音訊不會上傳到任何地方。
 - 14種風格：Acoustic、Ambient／Space、Cinematic、Funk／Disco、Heavy Rock／Metal、House／Dance、Indie Pop、Jazz／Natural、Lo-fi、Pop 2020s、Reggae／Groove、R&B／Soul、Rock、Trap／Hip-Hop。每種風格的數值都是UTUVO自己調出來的起點，不是任何人的配方，也不是音質保證。
-- 依風格加上的混音手法：bass在大鼓打下去時讓開（sidechain）、鼓組平行壓縮、跟著歌曲速度的人聲delay（抓不到穩定速度時改用短回音slapback）、殘響的pre-delay與長度也對齊歌曲速度，以及人聲、鼓、bass各自對其他聲部的音量自動檢查（以經過母帶EQ、實際聽到的聲音來量）。報告會寫出每一項實際量到的效果。
+- 依風格加上的混音手法：bass在大鼓打下去時讓開（sidechain）、鼓組平行壓縮、跟著歌曲速度的人聲delay（抓不到穩定速度時改用短回音slapback）、殘響的pre-delay與長度也對齊歌曲速度，以及人聲、鼓、bass各自對其他聲部的音量自動檢查（以經過母帶EQ、實際聽到的聲音來量）——檢查把哪一軌拉大或拉小，它的殘響和delay就跟著一起動（像推子後的送出）。飽和以超取樣處理，跟著每一段自己的大小走：加泛音（每個波形週期仍會被塑形，飽和本來就是這樣），但不會把小聲段落拉上來、把大小聲差距壓掉。報告會寫出每一項實際量到的效果。
 - 等響度A/B：混音後與原始總和用同一個響度比較，不會因為比較大聲就覺得比較好。
 - 每次混音都會存一份可編輯的`mixplan.json`；同一份計畫永遠渲染出同一個結果。
 - 可以另外匯出處理後的分軌給DAW（不含bus/master處理）。

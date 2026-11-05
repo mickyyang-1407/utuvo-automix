@@ -25,7 +25,7 @@ import wave
 import numpy as np
 
 from . import analyze, dsp, unmask
-from .plan import BALANCE_METER_LAW, ROLE_GROUP, SEND_MIN, PlanError, _manual_reverb_amount
+from .plan import BALANCE_METER_LAW, BALANCE_SEND_LAW, ROLE_GROUP, SEND_MIN, PlanError, _manual_reverb_amount
 
 #: plan vocabulary -> dsp vocabulary
 KIND_MAP = {
@@ -320,7 +320,8 @@ def _balance_meter(buses: dict, bus_specs: dict, sr: int) -> dict | None:
     return {name: dsp.apply_eq(sig, sr, bands) for name, sig in buses.items() if name != "fx"}
 
 
-def _vocal_balance(buses: dict, spec: dict, sr: int, warnings: list, meter: dict | None = None) -> dict | None:
+def _vocal_balance(buses: dict, spec: dict, sr: int, warnings: list, meter: dict | None = None,
+                   fader_db: dict | None = None) -> dict | None:
     """Move the whole vocal bus so the vocal sits at the plan's target.
 
     Measured on the processed buses, after every compressor and before the
@@ -357,6 +358,8 @@ def _vocal_balance(buses: dict, spec: dict, sr: int, warnings: list, meter: dict
             f"limited to {applied:+.1f} dB"
         )
     buses["vocal"] = vocal * dsp.db_to_lin(applied)
+    if fader_db is not None:
+        fader_db["vocal"] = applied
     if meter is not None and "vocal" in meter:
         meter["vocal"] = meter["vocal"] * dsp.db_to_lin(applied)
     out = {
@@ -408,11 +411,11 @@ def _part_balance(buses: dict, name: str, spec: dict, sr: int, warnings: list,
     if meter is not None and name in meter:
         meter[name] = meter[name] * dsp.db_to_lin(applied)
     return {"law": "part_var_v1", "measured_db": round(measured, 2), "target_db": round(target, 2),
-            "applied_db": round(applied, 2), "windows": windows}
+            "applied_db": round(applied, 2), "windows": windows, "_exact_db": applied}
 
 
 def _balance_band(buses: dict, bus_specs: dict, sr: int, warnings: list, rounds: int = 6,
-                  meter: dict | None = None) -> dict:
+                  meter: dict | None = None, fader_db: dict | None = None) -> dict:
     """Drum and bass balance together: alternate until neither moves more
     than 0.1 dB, then report where each one really ended up."""
     names = [n for n in ("drum", "bass") if (bus_specs.get(n) or {}).get("balance")]
@@ -432,6 +435,8 @@ def _balance_band(buses: dict, bus_specs: dict, sr: int, warnings: list, rounds:
             return {}
     first: dict[str, dict] = {}
     applied = {n: 0.0 for n in names}
+    # what the bus really moved (the receipt's applied_db adds rounded steps)
+    exact = {n: 0.0 for n in names}
     for _ in range(rounds):
         moved = 0.0
         for n in names:
@@ -444,7 +449,9 @@ def _balance_band(buses: dict, bus_specs: dict, sr: int, warnings: list, rounds:
             limit = float(bus_specs[n]["balance"].get("max_cut_db", 6.0)), float(bus_specs[n]["balance"].get("max_boost_db", 6.0))
             total = applied[n] + got["applied_db"]
             capped = max(-limit[0], min(limit[1], total))
+            exact[n] += got["_exact_db"]
             if abs(capped - total) > 1e-9:
+                exact[n] += capped - total
                 buses[n] = buses[n] * dsp.db_to_lin(capped - total)
                 if meter is not None and n in meter:
                     meter[n] = meter[n] * dsp.db_to_lin(capped - total)
@@ -456,6 +463,9 @@ def _balance_band(buses: dict, bus_specs: dict, sr: int, warnings: list, rounds:
     for n in names:
         if n not in first:
             continue
+        if fader_db is not None:
+            # the bus's real total move (applied_db sums rounded steps)
+            fader_db[n] = exact[n]
         metered = meter is not None and bus_specs[n]["balance"].get("meter") == BALANCE_METER_LAW
         view = meter if metered else buses
         rest = sum(sig for other, sig in view.items() if other not in (n, "vocal", "fx"))
@@ -487,7 +497,8 @@ def _parallel(sig: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dict]:
                  "crest_after_db": round(analyze._envelope_crest_db(out, sr), 2)}
 
 
-def _vocal_character(sig: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dict]:
+def _vocal_character(sig: np.ndarray, sr: int, spec: dict,
+                     sat_law: str = "peak_tanh_v1") -> tuple[np.ndarray, dict]:
     """Density and weight on the vocal bus, after its leveling compressor.
 
     A crushed parallel copy under the voice (thickness: the quiet syllables
@@ -512,7 +523,7 @@ def _vocal_character(sig: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, 
     drive = float(spec.get("saturation", 0.0))
     if drive > 1e-3:
         # saturation sets its own output level; keep the bus where it was
-        sat = dsp.saturate(out, drive)
+        sat = dsp.saturate(out, drive, law=sat_law, sr=sr)
         out = sat * (dsp.db_to_lin(_rms_db(out) - _rms_db(sat)))
     tone = [("peaking", 220.0, float(spec.get("body_db", 0.0)), 0.9),
             ("peaking", 4000.0, float(spec.get("presence_db", 0.0)), 0.8),
@@ -542,6 +553,50 @@ def _kick_duck(sig: np.ndarray, key: np.ndarray, sr: int, spec: dict) -> tuple[n
     return out, {"law": "kick_duck_v1", "depth_db": float(spec["depth_db"]),
                  "under_hits_db": round(float(np.mean(gain_db[hits])), 2) if hits.any() else 0.0,
                  "time_ducked": round(float(np.mean(gain_db <= -0.5)), 3)}
+
+
+def _send_followers(bus_specs: dict) -> set:
+    """The buses whose reverb and delay sends follow their balance move."""
+    out = set()
+    for name in ("vocal", "drum", "bass"):
+        law = ((bus_specs.get(name) or {}).get("balance") or {}).get("sends")
+        if law is None:
+            continue
+        if law != BALANCE_SEND_LAW:
+            raise RenderError(f"unknown balance send law {law!r}")
+        out.add(name)
+    return out
+
+
+def _join_followed(buses: dict, followed: dict, fader_db: dict, n: int) -> dict:
+    """Add the followed returns to the fx bus at their bus's balance move
+    (R117, post_fader_v1) and return the receipt.  A bus the balance did not
+    move (skipped, no target) keeps its returns as they were."""
+    buses.setdefault("fx", np.zeros((n, 2)))
+    out = {}
+    for name in sorted(followed):
+        wet = followed[name]
+        gain_db = float(fader_db.get(name, 0.0))
+        buses["fx"] += wet * dsp.db_to_lin(gain_db)
+        out[name] = {"law": BALANCE_SEND_LAW, "gain_db": round(gain_db, 2),
+                     "return_db": round(_rms_db(wet) + gain_db, 2)}
+    followed.clear()
+    return out
+
+
+def _wet_ratio(buses: dict, wet: np.ndarray, n: int, warnings: list) -> float | None:
+    """The pre-bus pure return against all dry tracks (one rule for every plan)."""
+    dry_sum = np.zeros((n, 2))
+    for sig in buses.values():
+        dry_sum += sig
+    dry_rms = float(np.sqrt(np.mean(dry_sum ** 2)))
+    wet_rms = float(np.sqrt(np.mean(wet.astype(np.float64) ** 2)))
+    del dry_sum
+    if dry_rms > 1e-12 and wet_rms > 0:
+        return round(20.0 * np.log10(wet_rms / dry_rms), 2)
+    if wet_rms > 0:
+        warnings.append("pre-bus reverb/dry ratio is undefined because the dry sum cancels to silence")
+    return None
 
 
 def _vocal_delay(sent: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dict]:
@@ -597,6 +652,10 @@ def render(
     decay = float(rev.get("decay_s", 1.6))
     predelay = float(rev.get("predelay_ms", rev.get("pre_delay_ms", 20.0)))
     high_cut = float(rev.get("high_cut_hz", 8000.0))
+    # R117: plans written before saturation_law saturate the way they were made with
+    sat_law = str(plan.get("saturation_law", "peak_tanh_v1"))
+    if sat_law not in dsp.SATURATION_LAWS:
+        raise RenderError(f"unknown saturation law {sat_law!r}")
     # plans written before plate_v2 replay with the reverb they were made with
     ir_law = str(rev.get("ir_law", "noise_v1"))
     if ir_law not in dsp.REVERB_IR_LAWS:
@@ -622,6 +681,13 @@ def render(
     duck_spec = (plan.get("buses", {}).get("bass") or {}).get("duck")
     duck_ids = set(duck_spec.get("key_ids") or []) if duck_spec else set()
     duck_key = np.zeros((n, 2)) if duck_ids else None
+    # R117: the buses whose sends follow their balance move (post_fader_v1).
+    # Their tracks' sends are summed apart from the rest, so their returns can
+    # be scaled by the balance gain once it is known.  Plans without the field
+    # have no such bus and every send goes into the one sum, as before.
+    follow = _send_followers(plan.get("buses") or {})
+    reverb_in_of: dict[str, np.ndarray] = {}
+    delay_in_of: dict[str, np.ndarray] = {}
 
     for st in stems:
         # the track id must come from the one place that defines it: the
@@ -733,7 +799,7 @@ def render(
         sat = float(t.get("saturation", 0.0))
         if sat > 1e-3:
             before = x.copy()
-            x = dsp.saturate(x, sat)
+            x = dsp.saturate(x, sat, law=sat_law, sr=sr)
             _mark("saturation", before)
 
         w = float(t.get("width", 1.0))
@@ -761,32 +827,34 @@ def render(
             if matched["skipped"]:
                 render_warnings.append(f"{tid}: loudness match skipped: {matched['skipped']}")
 
+        group = BUS_OF_ROLE.get(t["role"], "music")
         send = float((t.get("sends") or {}).get("plate", 0.0))
         if send > SEND_MIN:
             # accumulate the send *inputs*; the convolution happens once below.
             # Reverb is linear, so conv(sum(x*send)) == sum(conv(x)*send) --
             # but one FFT instead of one per track, which on a 3-minute session
             # is 12 convolutions of an 8.8M-point signal turned into one.
+            dest = reverb_in if group not in follow else reverb_in_of.setdefault(group, np.zeros((n, 2)))
             if send_env is not None:
-                reverb_in += x * (send * send_env)[:, None].astype(x.dtype)
+                dest += x * (send * send_env)[:, None].astype(x.dtype)
             else:
-                reverb_in += x * send
+                dest += x * send
 
         delay_send = float((t.get("sends") or {}).get("delay", 0.0))
         if delay_send > SEND_MIN:
             if delay_in is None:
                 raise RenderError(f"{tid} sends to a delay but the plan has no delay block")
+            dest = delay_in if group not in follow else delay_in_of.setdefault(group, np.zeros((n, 2)))
             # the sections' send contour moves every send, the delay's too
             if send_env is not None:
-                delay_in += x * (delay_send * send_env)[:, None].astype(x.dtype)
+                dest += x * (delay_send * send_env)[:, None].astype(x.dtype)
             else:
-                delay_in += x * delay_send
+                dest += x * delay_send
         if tid in duck_ids:
             duck_key += x
 
         if collect is not None:
             collect.setdefault("stems", {})[tid] = x
-        group = BUS_OF_ROLE.get(t["role"], "music")
         buses.setdefault(group, np.zeros((n, 2)))
         buses[group] += x
 
@@ -835,23 +903,48 @@ def render(
     # already contain dry tracks with role=fx; exporting the whole bus as a
     # reverb return would count those dry tracks twice in a DAW.
     wet_ratio_db = None
-    if reverb_in.any():
+    # R117: the returns of the buses that follow their fader, pre-fader; they
+    # join the fx bus after the balance step, scaled by its gain
+    followed_wet: dict[str, np.ndarray] = {}
+    if reverb_in_of:
+        # one convolution per part instead of one: the parts are scaled apart
+        # later.  Their pre-fader sum is what the wet/dry ratio and the export
+        # describe, exactly as for a plan without the field.
+        parts: dict[str, np.ndarray] = {}
+        for key, src in [("", reverb_in), *reverb_in_of.items()]:
+            if not src.any():
+                continue
+            if manual_amount == 0.0:
+                parts[key] = np.zeros_like(src)
+            else:
+                parts[key] = dsp.reverb_send(src, sr, 1.0, decay, predelay, high_cut, ir_law=ir_law)
+        reverb_in_of.clear()
+        if parts:
+            total = np.zeros((n, 2))
+            for part in parts.values():
+                total += part
+            if manual_amount not in (0.0, 1.0):
+                # the manual amount scales the summed return once (as for a
+                # plan without the field), and each part by the same factor
+                total = total * manual_amount
+                parts = {k: v * manual_amount for k, v in parts.items()}
+            wet_ratio_db = _wet_ratio(buses, total, n, render_warnings)
+            if collect is not None and manual_amount != 0.0:
+                collect["reverb"] = total
+            del total
+            buses.setdefault("fx", np.zeros((n, 2)))
+            if "" in parts:
+                buses["fx"] += parts.pop("")
+            followed_wet.update(parts)
+        del parts
+    elif reverb_in.any():
         if manual_amount == 0.0:
             true_return = np.zeros_like(reverb_in)
         else:
             true_return = dsp.reverb_send(reverb_in, sr, 1.0, decay, predelay, high_cut, ir_law=ir_law)
             if manual_amount != 1.0:
                 true_return = true_return * manual_amount
-        dry_sum = np.zeros((n, 2))
-        for sig in buses.values():
-            dry_sum += sig
-        dry_rms = float(np.sqrt(np.mean(dry_sum ** 2)))
-        wet_rms = float(np.sqrt(np.mean(true_return.astype(np.float64) ** 2)))
-        del dry_sum
-        if dry_rms > 1e-12 and wet_rms > 0:
-            wet_ratio_db = round(20.0 * np.log10(wet_rms / dry_rms), 2)
-        elif wet_rms > 0:
-            render_warnings.append("pre-bus reverb/dry ratio is undefined because the dry sum cancels to silence")
+        wet_ratio_db = _wet_ratio(buses, true_return, n, render_warnings)
         if collect is not None and manual_amount != 0.0:
             collect["reverb"] = true_return
         buses.setdefault("fx", np.zeros((n, 2)))
@@ -862,7 +955,34 @@ def render(
     # The delay joins the fx bus after the reverb's wet/dry was measured, so
     # that number still describes the reverb alone.
     delay_report = None
-    if delay_in is not None and delay_in.any():
+    if delay_in_of:
+        # each part is ducked by what it sent: the voice ducks its own echoes
+        # (with only vocal senders -- what the planner writes -- that is the
+        # same key as before)
+        reports = []
+        total = None
+        for key, src in [("", delay_in), *delay_in_of.items()]:
+            if src is None or not src.any():
+                continue
+            part, rep = _vocal_delay(src, sr, delay_spec)
+            reports.append((_rms_db(src), rep))
+            total = part.copy() if total is None else total + part
+            if key:
+                followed_wet[key] = followed_wet[key] + part if key in followed_wet else part
+            else:
+                buses.setdefault("fx", np.zeros((n, 2)))
+                buses["fx"] += part
+            del part
+        delay_in_of.clear()
+        if reports:
+            # the receipt of the part that sent the most (the voice)
+            delay_report = max(reports, key=lambda r: r[0])[1]
+            if len(reports) > 1:
+                delay_report["parts"] = len(reports)
+        if collect is not None and total is not None:
+            collect["delay"] = total
+        del total
+    elif delay_in is not None and delay_in.any():
         delay_return, delay_report = _vocal_delay(delay_in, sr, delay_spec)
         if collect is not None:
             collect["delay"] = delay_return
@@ -874,8 +994,8 @@ def render(
     # ---- group buses
     bus_specs = plan.get("buses", {})
     moves: dict[str, dict] = {}
-    for name in buses:
-        sig = buses[name]
+
+    def _bus_chain(name: str, sig: np.ndarray) -> np.ndarray:
         spec = bus_specs.get(name) or {}
         # before the bus compressor, as on a console: the parallel copy and
         # the sidechain shape what the glue then holds together
@@ -885,13 +1005,18 @@ def render(
             sig, moves["kick_duck"] = _kick_duck(sig, duck_key, sr, spec["duck"])
         sig = _apply_comp(sig, sr, spec.get("comp"))
         if name == "vocal" and spec.get("character"):
-            sig, moves["vocal_character"] = _vocal_character(sig, sr, spec["character"])
+            sig, moves["vocal_character"] = _vocal_character(sig, sr, spec["character"], sat_law)
         sat = float(spec.get("saturation", 0.0))
         if sat > 1e-3:
-            sig = dsp.saturate(sig, sat)
-        sig = _set_width(sig, float(spec.get("width", 1.0)))
-        buses[name] = sig
-        del sig
+            sig = dsp.saturate(sig, sat, law=sat_law, sr=sr)
+        return _set_width(sig, float(spec.get("width", 1.0)))
+
+    # with returns still to come (R117), the fx bus is processed once they
+    # have joined it, after the balance step (which never looks at fx)
+    for name in buses:
+        if followed_wet and name == "fx":
+            continue
+        buses[name] = _bus_chain(name, buses[name])
 
     del duck_key
 
@@ -900,9 +1025,18 @@ def render(
     # one is part of the other's reference, so moving the bass moves where
     # the drums sit: they are adjusted in turn until both stay put.
     meter = _balance_meter(buses, bus_specs, sr)
-    part_balance = _balance_band(buses, bus_specs, sr, render_warnings, meter=meter)
-    vocal_balance = _vocal_balance(buses, bus_specs.get("vocal") or {}, sr, render_warnings, meter=meter)
+    fader_db_band: dict[str, float] = {}
+    part_balance = _balance_band(buses, bus_specs, sr, render_warnings, meter=meter, fader_db=fader_db_band)
+    fader_db: dict[str, float] = dict(fader_db_band)
+    vocal_balance = _vocal_balance(buses, bus_specs.get("vocal") or {}, sr, render_warnings, meter=meter,
+                                   fader_db=fader_db)
     del meter
+
+    # R117: the followed returns join the fx bus at their bus's fader
+    send_follow = None
+    if followed_wet:
+        send_follow = _join_followed(buses, followed_wet, fader_db, n)
+        buses["fx"] = _bus_chain("fx", buses["fx"])
 
     # The fx bus is part of the original mix path (dry FX plus wet return).
     # Its level must not be described as the pure reverb level.
@@ -1053,7 +1187,11 @@ def render(
         report["part_balance"] = part_balance
     if delay_report is not None:
         moves["vocal_delay"] = delay_report
+    if send_follow is not None:
+        report["send_follow"] = send_follow
     report["limiter"] = limiting
+    if "saturation_law" in plan:
+        report["saturation_law"] = sat_law
     report["space"] = {"reverb_ir_law": ir_law, "side_air_db": float(m.get("side_air_db") or 0.0)}
     timing = (plan.get("reverb") or {}).get("timing")
     if isinstance(timing, dict) and timing.get("bpm"):
@@ -1372,6 +1510,18 @@ def write_report(path: str, plan: dict, report: dict, stems: list) -> None:
             f"(target {pb['target_db']:+.1f}; was {pb['measured_db']:+.1f}, moved {pb['applied_db']:+.1f} dB) |"
             for name, pb in (report.get("part_balance") or {}).items()
         ],
+        *(
+            [f"| saturation | {report['saturation_law']}: follows each passage's level, 4x oversampled |"]
+            if report.get("saturation_law") == "env_tanh_os4_v1"
+            else []
+        ),
+        *(
+            ["| reverb and delay sends (post-fader: they follow the balance move) | "
+             + ", ".join(f"{name} {sf[name]['gain_db']:+.1f} dB" for name in ("vocal", "drum", "bass") if name in sf)
+             + " |"]
+            if (sf := report.get("send_follow"))
+            else []
+        ),
         *_move_rows(report.get("mix_moves") or {}),
         "",
         "## Tracks",

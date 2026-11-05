@@ -291,6 +291,10 @@
         "type": "string"
       }
     },
+    "saturation_law": {
+      "description": "R117: how every track's and bus's saturation (and the vocal character's) is shaped. env_tanh_os4_v1: a tanh normalised to the signal's own 30 ms peak envelope, at 4x the sample rate, RMS kept (the level contour between passages is kept; harmonics above the original Nyquist are filtered out instead of folding back). When absent: peak_tanh_v1, normalised to the single largest peak at the sample rate, as plans before R117 were rendered.",
+      "enum": ["peak_tanh_v1", "env_tanh_os4_v1"]
+    },
     "delay": {
       "description": "The vocal delay that tracks' sends.delay feed. Locked to the song's tempo when it is clear (tempo records what was found), otherwise a slapback. The return is ducked while the sent signal plays and joins the fx bus.",
       "type": "object",
@@ -710,6 +714,10 @@
           "maxItems": 12,
           "default": []
         },
+        "comp_style_dial": {
+          "description": "R117 receipt (drum_open_v1): what the style's compression dial alone would have written into comp (ratio, attack_ms; for the drum bus also threshold_db and threshold_offset_db) before new plans opened up the drums. The renderer does not read it.",
+          "type": "object"
+        },
         "comp": {
           "$ref": "#/$defs/compressor"
         },
@@ -851,6 +859,10 @@
           "maxItems": 8,
           "default": []
         },
+        "comp_style_dial": {
+          "description": "R117 receipt (drum_open_v1): what the style's compression dial alone would have written into comp (ratio, attack_ms; for the drum bus also threshold_db and threshold_offset_db) before new plans opened up the drums. The renderer does not read it.",
+          "type": "object"
+        },
         "comp": {
           "$ref": "#/$defs/compressor"
         },
@@ -908,6 +920,10 @@
             "meter": {
               "description": "How the balance is measured. master_eq_v1: through the master EQ (what the listener hears). When absent: the buses as they are, as plans before R116 were rendered.",
               "enum": ["master_eq_v1"]
+            },
+            "sends": {
+              "description": "R117: what happens to the reverb and delay sends of this bus's tracks when the balance moves the bus. post_fader_v1: their returns follow it (scaled by the same gain, as a post-fader send on a console). When absent: only the dry bus moves and the returns stay where they were, as plans before R117 were rendered.",
+              "enum": ["post_fader_v1"]
             }
           },
           "additionalProperties": false
