@@ -75,6 +75,7 @@
     "source_refs": []
   },
   "techniques": {
+    "vocal_reverb_duck_db": 3.0,
     "kick_duck_db": 4.0,
     "drum_parallel": 0.125,
     "drum_forward_db": 1.0,

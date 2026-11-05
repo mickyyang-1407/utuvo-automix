@@ -46,6 +46,19 @@ def _box_smooth(x: np.ndarray, width: int) -> np.ndarray:
     return out[: x.shape[0]]
 
 
+def _box_trailing(x: np.ndarray, width: int) -> np.ndarray:
+    """Trailing moving average: each output is the mean of the last ``width``
+    inputs (only the past), O(n) via cumulative sum, edge-padded at the start."""
+    width = max(1, int(width))
+    if width == 1:
+        return x.copy()
+    xp = np.pad(x, (width - 1, 0), mode="edge")
+    c = np.cumsum(xp, dtype=np.float64)
+    c = np.concatenate(([0.0], c))
+    out = (c[width:] - c[:-width]) / width
+    return out[: x.shape[0]]
+
+
 def _next_fast_len(n: int) -> int:
     """Smallest 2^a * 3^b * 5^c >= n, for fast FFTs."""
     if n <= 16:
@@ -187,13 +200,32 @@ def mono_below(x: np.ndarray, sr: int, hz: float) -> np.ndarray:
 # ---------------------------------------------------------------- dynamics
 
 
-def _env(x: np.ndarray, sr: int, attack_ms: float, release_ms: float) -> np.ndarray:
+#: R119: how the compressor's detector reads the signal.
+#:   centred_box_v1  -- the attack and release windows are centred on the
+#:                      sample (plans without ``compressor_law``).  The
+#:                      detector sees half a window into the future: with a
+#:                      30 ms attack a drum hit's first 5 ms are turned down
+#:                      more than its body (10.6 against 7.0 dB on a synthetic
+#:                      kick, measured in R119) and the bed is turned down
+#:                      20-40 ms *before* the hit -- the opposite of what a
+#:                      slow attack is for.
+#:   trailing_box_v1 -- the same two windows, ending at the sample: the
+#:                      detector reads only the past, as a real compressor
+#:                      does, so a hit's start passes for about the attack
+#:                      time and the body is held.  Steady-state level and
+#:                      gain are the same as centred_box_v1.
+COMPRESSOR_LAWS = ("centred_box_v1", "trailing_box_v1")
+
+
+def _env(x: np.ndarray, sr: int, attack_ms: float, release_ms: float,
+         law: str = "centred_box_v1") -> np.ndarray:
     """Smoothed magnitude envelope, attack/release approximated by box blend."""
     mag = np.sqrt(np.mean(x * x, axis=1)) if x.ndim == 2 else np.abs(x)
     a = max(1, int(sr * attack_ms / 1000.0))
     r = max(1, int(sr * release_ms / 1000.0))
-    ea = _box_smooth(mag, a)
-    er = _box_smooth(mag, r)
+    box = _box_trailing if law == "trailing_box_v1" else _box_smooth
+    ea = box(mag, a)
+    er = box(mag, r)
     # fast movement uses the attack window, slow body uses the release window
     return np.maximum(ea, er * 0.85)
 
@@ -208,11 +240,16 @@ def compress(
     release_ms: float = 120.0,
     makeup_mode: str = "half_average_reduction",
     makeup_cap_db: float = 12.0,
+    law: str = "centred_box_v1",
 ) -> np.ndarray:
-    """Soft-knee downward compressor. `amount` in 0..1 scales ratio & depth."""
+    """Soft-knee downward compressor. `amount` in 0..1 scales ratio & depth.
+
+    ``law`` is the detector (see COMPRESSOR_LAWS)."""
+    if law not in COMPRESSOR_LAWS:
+        raise ValueError(f"unknown compressor law {law!r}")
     if amount <= 1e-3:
         return x
-    env = _env(x, sr, attack_ms, release_ms)
+    env = _env(x, sr, attack_ms, release_ms, law=law)
     env_db = 20.0 * np.log10(np.maximum(env, EPS))
     over = np.maximum(env_db - threshold_db, 0.0)
     ratio = 1.0 + (ratio_max - 1.0) * float(np.clip(amount, 0.0, 1.0))
@@ -222,7 +259,7 @@ def compress(
     soft = np.clip((env_db - (threshold_db - knee / 2)) / knee, 0.0, 1.0)
     gain_db = gain_db * (0.35 + 0.65 * soft)
     g = 10.0 ** (gain_db / 20.0)
-    g = _box_smooth(g, max(1, int(sr * 0.004)))
+    g = (_box_trailing if law == "trailing_box_v1" else _box_smooth)(g, max(1, int(sr * 0.004)))
     # auto make-up: recover roughly half the average reduction.  The rule
     # comes from the plan (mode and cap), so the plan still determines the
     # audio; "makeup_db: 0" would have been untrue, and a rule is honest.
@@ -1146,10 +1183,14 @@ def width_ratio(x: np.ndarray) -> float:
 # ------------------------------------------------- sidechain, parallel, delay
 
 
-def key_level_db(key: np.ndarray, sr: int, attack_ms: float) -> np.ndarray:
-    """The key's own short-window level, with no hold: what it really does."""
+def key_level_db(key: np.ndarray, sr: int, attack_ms: float, trailing: bool = False) -> np.ndarray:
+    """The key's own short-window level, with no hold: what it really does.
+
+    ``trailing`` (R119, voice_duck) averages the last ``attack_ms`` only; the
+    default centred window (the kick duck, plans before R119) sees half of
+    it ahead."""
     mag = np.sqrt(np.mean(key * key, axis=1)) if key.ndim == 2 else np.abs(key)
-    level = _box_smooth(mag * mag, max(1, int(sr * attack_ms / 1000.0)))
+    level = (_box_trailing if trailing else _box_smooth)(mag * mag, max(1, int(sr * attack_ms / 1000.0)))
     return 10.0 * np.log10(np.maximum(level, EPS * EPS))
 
 
@@ -1171,6 +1212,44 @@ def key_envelope_db(key: np.ndarray, sr: int, attack_ms: float, release_ms: floa
 
 #: how far a key's hits must stand above its resting level to be followed
 DUCK_MIN_HIT_DB = 6.0
+
+#: R119 voice_duck_v1: the duck is full while the voice is at or above its
+#: own singing level (the median where it is present) and opens over the
+#: VOICE_DUCK_RANGE_DB below that, so quiet breaths and gaps leave the
+#: return open
+VOICE_DUCK_RANGE_DB = 10.0
+VOICE_DUCK_PRESENT_DB = 40.0
+
+
+def voice_duck(x: np.ndarray, key: np.ndarray, sr: int, depth_db: float,
+               attack_ms: float = 20.0, release_ms: float = 250.0) -> tuple[np.ndarray, dict]:
+    """Turn a reverb return down while the voice that feeds it sings (R119).
+
+    The detector is the key's level over the last 10 ms (a trailing window:
+    it reads only what was sung) with a causal hold that falls 20 dB per
+    ``release_ms`` (key_envelope_db).  Full depth at or above the voice's
+    own singing level -- the median of its level where it is present (within
+    40 dB of its loudest) -- and none ``VOICE_DUCK_RANGE_DB`` below it, so the
+    tail blooms in the gaps.  The gain moves in over ``attack_ms`` (a trailing
+    average: it only reacts to what was sung).  Returns (signal, receipt).
+    """
+    n = x.shape[0]
+    if depth_db <= 0.0 or n == 0 or not key.any():
+        return x, {"skipped": "nothing to duck"}
+    level_db = key_level_db(key, sr, 10.0, trailing=True)
+    env_db = key_envelope_db(key, sr, 10.0, release_ms, level_db=level_db)
+    peak_db = float(np.max(level_db))
+    present = level_db[level_db > peak_db - VOICE_DUCK_PRESENT_DB]
+    sing_db = float(np.median(present))
+    amount = np.clip((env_db - (sing_db - VOICE_DUCK_RANGE_DB)) / VOICE_DUCK_RANGE_DB, 0.0, 1.0)
+    gain_db = _box_trailing(-float(depth_db) * amount, max(1, int(sr * attack_ms / 1000.0)))
+    g = (10.0 ** (gain_db / 20.0)).astype(x.dtype, copy=False)
+    out = x * g[:, None] if x.ndim == 2 else x * g
+    singing = level_db > sing_db - 3.0
+    gaps = level_db < sing_db - 30.0
+    return out, {"singing_db": round(sing_db, 2),
+                 "gain_while_singing_db": round(float(np.median(gain_db[singing])), 2) if singing.any() else None,
+                 "gain_in_gaps_db": round(float(np.median(gain_db[gaps])), 2) if gaps.any() else None}
 
 
 def duck(
@@ -1226,6 +1305,7 @@ def parallel_compress(
     attack_ms: float = 2.0,
     release_ms: float = 80.0,
     level_from: str = "whole",
+    law: str = "centred_box_v1",
 ) -> np.ndarray:
     """New-York compression: a crushed copy under the dry signal.
 
@@ -1245,7 +1325,7 @@ def parallel_compress(
     ref = active_rms(x, sr) if level_from == "active" else rms
     crushed = compress(x, sr, 1.0, threshold_db=lin_to_db(ref) + threshold_offset_db,
                        ratio_max=ratio, attack_ms=attack_ms, release_ms=release_ms,
-                       makeup_mode="none")
+                       makeup_mode="none", law=law)
     c_rms = float(np.sqrt(np.mean(crushed.astype(np.float64) ** 2)))
     if c_rms <= EPS:
         return x

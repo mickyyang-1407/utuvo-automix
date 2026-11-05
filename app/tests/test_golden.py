@@ -114,17 +114,29 @@ SR = 48000
 #: presence .0249 -> .0233, air .0099 -> .0080; LUFS -10.54 -> -10.57,
 #: crest 11.40 -> 11.36.  Intended.  Saved plans render as before (replay of
 #: R94/R104/R115/R116).
+#: 2026-11-05 (R119): every compressor's detector reads only the past
+#: (compressor_law trailing_box_v1; the centred one looked half a window
+#: ahead and shaved each hit's start, -10.6 dB on a synthetic kick's first
+#: 5 ms against -7.0 on its body).  The demo's synthetic drums and pulses now
+#: keep their attack: crest 11.36 -> 12.49, and the release limiter backs
+#: off 1.4 dB rather than squash them (LUFS -10.57 -> -11.58; on 15 real
+#: MedleyDB songs the law moves LUFS by -0.05 dB, at most -0.31).  The vocal reverb steps
+#: back 4 dB while the voice sings and the return is lifted 4 dB (reverb.duck):
+#: as wet as before under the words, more tail in the gaps.  Low .2587 ->
+#: .2191, low_mid .5365 -> .5597, mid .1676 -> .1808, presence .0233 ->
+#: .0254, air .0080 -> .0086; width .145 -> .149; correlation .961 -> .958.
+#: Intended.  Saved plans render as before (replay of R94/R104/R115-R118).
 EXPECTED = {
-    "lufs": -10.57,
-    "crest_db": 11.36,
-    "width": 0.145,
-    "correlation": 0.961,
+    "lufs": -11.58,
+    "crest_db": 12.49,
+    "width": 0.149,
+    "correlation": 0.958,
     "band_energy": {
-        "low": 0.2587,
-        "low_mid": 0.5365,
-        "mid": 0.1676,
-        "presence": 0.0233,
-        "air": 0.0080,
+        "low": 0.2191,
+        "low_mid": 0.5597,
+        "mid": 0.1808,
+        "presence": 0.0254,
+        "air": 0.0086,
     },
 }
 
@@ -172,3 +184,20 @@ def test_every_track_explains_itself(demo_mix):
     for track in plan["tracks"]:
         assert track.get("evidence"), track["id"]
         assert -18.0 <= track["gain_db"] <= 18.0
+
+
+def test_new_plans_only_fall_short_by_the_squash_guard(demo_mix):
+    """R119: compressors that read only the past keep the demo's attacks, so
+    the release limiter's squash guard backs the master off (1.4 dB here)
+    rather than flatten them.  The miss is that back-off and nothing more,
+    the back-off stays within the plan's cap, the loudest 5% stay within the
+    guard, and the report says so."""
+    plan, _, report = demo_mix
+    lim = plan["buses"]["master"]["limiter"]
+    target = plan["buses"]["master"]["target_lufs"]
+    backed = float(report["limiter"].get("backed_off_db", 0.0))
+    assert backed <= float(lim["max_backoff_db"]) + 1e-9
+    assert target - report["lufs"] <= backed + 0.3
+    assert report["limiter"]["gain_reduction_p95_db"] >= -float(lim["max_gr_p95_db"]) - 0.2
+    if backed > 0:
+        assert any(w.startswith("loudness:") for w in report["warnings"])

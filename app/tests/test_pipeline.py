@@ -362,9 +362,9 @@ def test_bus_compression_actually_compresses(session):
     original = rnd._apply_comp
     reductions = []
 
-    def spy(x, sr, spec):
+    def spy(x, sr, spec, *law):
         if spec:
-            y = original(x, sr, spec)
+            y = original(x, sr, spec, *law)
             gr = 20 * np.log10(
                 float(np.sqrt(np.mean(y.astype(float) ** 2)))
                 / (float(np.sqrt(np.mean(x.astype(float) ** 2))) + 1e-12)

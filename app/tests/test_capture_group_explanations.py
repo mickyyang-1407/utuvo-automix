@@ -216,6 +216,9 @@ def _without_ratio_law(plan: dict) -> dict:
             for key in ("ratio", "attack_ms", "threshold_db", "threshold_offset_db"):
                 if key in was:
                     block["comp"][key] = was[key]
+    # R119: the compressor detector law and the voice-ducked vocal reverb
+    plan.pop("compressor_law", None)
+    (plan.get("reverb") or {}).pop("duck", None)
     if "warnings" in plan:
         plan["warnings"] = [w for w in plan["warnings"] if not w.startswith("vocal delay:")]
     return plan

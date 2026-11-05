@@ -25,7 +25,8 @@ import wave
 import numpy as np
 
 from . import analyze, dsp, unmask
-from .plan import BALANCE_METER_LAW, BALANCE_SEND_LAW, ROLE_GROUP, SEND_MIN, PlanError, _manual_reverb_amount
+from .plan import (BALANCE_METER_LAW, BALANCE_SEND_LAW, REVERB_DUCK_LAW, ROLE_GROUP, SEND_MIN, PlanError,
+                   _manual_reverb_amount)
 
 #: plan vocabulary -> dsp vocabulary
 KIND_MAP = {
@@ -264,7 +265,7 @@ def _dynamic_eq(x: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dict]:
     return result, record
 
 
-def _apply_comp(x: np.ndarray, sr: int, spec: dict | None) -> np.ndarray:
+def _apply_comp(x: np.ndarray, sr: int, spec: dict | None, law: str = "centred_box_v1") -> np.ndarray:
     if not spec:
         return x
     # plans without a ratio law were written before it existed and replay
@@ -294,6 +295,7 @@ def _apply_comp(x: np.ndarray, sr: int, spec: dict | None) -> np.ndarray:
         release_ms=float(spec.get("release_ms", 120.0)),
         makeup_mode=str(makeup.get("mode", "half_average_reduction")),
         makeup_cap_db=float(makeup.get("cap_db", 12.0)),
+        law=law,
     )
 
 
@@ -486,7 +488,7 @@ def _balance_band(buses: dict, bus_specs: dict, sr: int, warnings: list, rounds:
     return out
 
 
-def _parallel(sig: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dict]:
+def _parallel(sig: np.ndarray, sr: int, spec: dict, law: str = "centred_box_v1") -> tuple[np.ndarray, dict]:
     """The drum bus's New-York compression, with what it did to the shape."""
     if spec.get("law") != "parallel_v1":
         raise RenderError(f"unknown parallel compression law {spec.get('law')!r}")
@@ -494,14 +496,14 @@ def _parallel(sig: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dict]:
     out = dsp.parallel_compress(sig, sr, float(spec["blend"]), ratio=float(spec.get("ratio", 8.0)),
                                 threshold_offset_db=float(spec.get("threshold_offset_db", -10.0)),
                                 attack_ms=float(spec.get("attack_ms", 2.0)),
-                                release_ms=float(spec.get("release_ms", 80.0)))
+                                release_ms=float(spec.get("release_ms", 80.0)), law=law)
     return out, {"law": "parallel_v1", "blend": float(spec["blend"]),
                  "crest_before_db": round(before, 2),
                  "crest_after_db": round(analyze._envelope_crest_db(out, sr), 2)}
 
 
 def _vocal_character(sig: np.ndarray, sr: int, spec: dict,
-                     sat_law: str = "peak_tanh_v1") -> tuple[np.ndarray, dict]:
+                     sat_law: str = "peak_tanh_v1", comp_law: str = "centred_box_v1") -> tuple[np.ndarray, dict]:
     """Density and weight on the vocal bus, after its leveling compressor.
 
     A crushed parallel copy under the voice (thickness: the quiet syllables
@@ -522,7 +524,7 @@ def _vocal_character(sig: np.ndarray, sr: int, spec: dict,
     blend = float(spec.get("parallel_blend", 0.0))
     if blend > 1e-3:
         out = dsp.parallel_compress(out, sr, blend, ratio=10.0, threshold_offset_db=-12.0,
-                                    attack_ms=3.0, release_ms=90.0, level_from="active")
+                                    attack_ms=3.0, release_ms=90.0, level_from="active", law=comp_law)
     drive = float(spec.get("saturation", 0.0))
     if drive > 1e-3:
         # saturation sets its own output level; keep the bus where it was
@@ -569,6 +571,22 @@ def _send_followers(bus_specs: dict) -> set:
             raise RenderError(f"unknown balance send law {law!r}")
         out.add(name)
     return out
+
+
+def _reverb_duck_spec(plan: dict) -> dict | None:
+    """R119: plan.reverb.duck, checked; None when the plan has none."""
+    spec = (plan.get("reverb") or {}).get("duck")
+    if spec is None:
+        return None
+    if spec.get("law") != REVERB_DUCK_LAW:
+        raise RenderError(f"unknown reverb duck law {spec.get('law')!r}")
+    depth = float(spec.get("depth_db", 0.0))
+    if not np.isfinite(depth) or not 0.0 <= depth <= 12.0:
+        raise RenderError("reverb.duck.depth_db must be between 0 and 12 dB")
+    makeup = float(spec.get("makeup_db", 0.0))
+    if not np.isfinite(makeup) or not 0.0 <= makeup <= 12.0:
+        raise RenderError("reverb.duck.makeup_db must be between 0 and 12 dB")
+    return spec if depth > 0.0 else None
 
 
 def _user_trims(bus_specs: dict) -> dict:
@@ -674,6 +692,10 @@ def render(
     sat_law = str(plan.get("saturation_law", "peak_tanh_v1"))
     if sat_law not in dsp.SATURATION_LAWS:
         raise RenderError(f"unknown saturation law {sat_law!r}")
+    # R119: plans without it render with the detector they were written for
+    comp_law = str(plan.get("compressor_law", "centred_box_v1"))
+    if comp_law not in dsp.COMPRESSOR_LAWS:
+        raise RenderError(f"unknown compressor law {comp_law!r}")
     # plans written before plate_v2 replay with the reverb they were made with
     ir_law = str(rev.get("ir_law", "noise_v1"))
     if ir_law not in dsp.REVERB_IR_LAWS:
@@ -707,6 +729,10 @@ def render(
     # R118: a group the user moved carries its sends along too
     user_trims = _user_trims(plan.get("buses") or {})
     follow |= {g for g in user_trims if g != "fx"}
+    # R119: a ducked vocal reverb needs the vocal's own return
+    reverb_duck = _reverb_duck_spec(plan)
+    if reverb_duck:
+        follow.add("vocal")
     reverb_in_of: dict[str, np.ndarray] = {}
     delay_in_of: dict[str, np.ndarray] = {}
 
@@ -800,7 +826,7 @@ def render(
 
         before = x.copy()
         crest_before = analyze._envelope_crest_db(x, sr)
-        x = _apply_comp(x, sr, t.get("comp"))
+        x = _apply_comp(x, sr, t.get("comp"), comp_law)
         crest_after = analyze._envelope_crest_db(x, sr)
         _mark("compressor", before)
 
@@ -924,6 +950,7 @@ def render(
     # already contain dry tracks with role=fx; exporting the whole bus as a
     # reverb return would count those dry tracks twice in a DAW.
     wet_ratio_db = None
+    reverb_duck_report = None
     # R117: the returns of the buses that follow their fader, pre-fader; they
     # join the fx bus after the balance step, scaled by its gain
     followed_wet: dict[str, np.ndarray] = {}
@@ -939,6 +966,27 @@ def render(
                 parts[key] = np.zeros_like(src)
             else:
                 parts[key] = dsp.reverb_send(src, sr, 1.0, decay, predelay, high_cut, ir_law=ir_law)
+        # R119: the vocal's own return is turned down while the voice sings
+        # (keyed by what the voice sent), before anything measures or exports it
+        if reverb_duck and "vocal" in parts and parts["vocal"].any():
+            before_db = _rms_db(parts["vocal"])
+            parts["vocal"], duck_receipt = dsp.voice_duck(
+                parts["vocal"], reverb_in_of["vocal"], sr, float(reverb_duck["depth_db"]),
+                attack_ms=float(reverb_duck.get("attack_ms", 20.0)),
+                release_ms=float(reverb_duck.get("release_ms", 250.0)))
+            # the makeup lifts the whole return back: with makeup = depth the
+            # voice is as wet as before while it sings, and the tail blooms
+            # by the depth in the gaps
+            makeup = float(reverb_duck.get("makeup_db", 0.0))
+            if makeup:
+                parts["vocal"] = parts["vocal"] * dsp.db_to_lin(makeup)
+            net = {k: (round(v + makeup, 2) if v is not None else None) for k, v in duck_receipt.items()
+                   if k in ("gain_while_singing_db", "gain_in_gaps_db")}
+            reverb_duck_report = {"law": reverb_duck["law"], "depth_db": float(reverb_duck["depth_db"]),
+                                  "makeup_db": makeup,
+                                  "release_ms": float(reverb_duck.get("release_ms", 250.0)),
+                                  "return_change_db": round(_rms_db(parts["vocal"]) - before_db, 2),
+                                  **duck_receipt, **net}
         reverb_in_of.clear()
         if parts:
             total = np.zeros((n, 2))
@@ -1021,12 +1069,12 @@ def render(
         # before the bus compressor, as on a console: the parallel copy and
         # the sidechain shape what the glue then holds together
         if name == "drum" and spec.get("parallel"):
-            sig, moves["drum_parallel"] = _parallel(sig, sr, spec["parallel"])
+            sig, moves["drum_parallel"] = _parallel(sig, sr, spec["parallel"], comp_law)
         if name == "bass" and spec.get("duck") and duck_key is not None and duck_key.any():
             sig, moves["kick_duck"] = _kick_duck(sig, duck_key, sr, spec["duck"])
-        sig = _apply_comp(sig, sr, spec.get("comp"))
+        sig = _apply_comp(sig, sr, spec.get("comp"), comp_law)
         if name == "vocal" and spec.get("character"):
-            sig, moves["vocal_character"] = _vocal_character(sig, sr, spec["character"], sat_law)
+            sig, moves["vocal_character"] = _vocal_character(sig, sr, spec["character"], sat_law, comp_law)
         sat = float(spec.get("saturation", 0.0))
         if sat > 1e-3:
             sig = dsp.saturate(sig, sat, law=sat_law, sr=sr)
@@ -1102,7 +1150,7 @@ def render(
 
     # ---- master
     m = bus_specs.get("master") or {}
-    mix = _apply_comp(mix, sr, m.get("comp"))
+    mix = _apply_comp(mix, sr, m.get("comp"), comp_law)
 
     mb = float(m.get("mono_below_hz", 0.0))
     if mb > 0:
@@ -1225,6 +1273,10 @@ def render(
     report["limiter"] = limiting
     if "saturation_law" in plan:
         report["saturation_law"] = sat_law
+    if "compressor_law" in plan:
+        report["compressor_law"] = comp_law
+    if reverb_duck_report is not None:
+        report["reverb_duck"] = reverb_duck_report
     report["space"] = {"reverb_ir_law": ir_law, "side_air_db": float(m.get("side_air_db") or 0.0)}
     timing = (plan.get("reverb") or {}).get("timing")
     if isinstance(timing, dict) and timing.get("bpm"):
@@ -1552,6 +1604,21 @@ def write_report(path: str, plan: dict, report: dict, stems: list) -> None:
         *(
             [f"| saturation | {report['saturation_law']}: follows each passage's level, 4x oversampled |"]
             if report.get("saturation_law") == "env_tanh_os4_v1"
+            else []
+        ),
+        *(
+            [f"| compressors | {report['compressor_law']}: the detector reads only the past, "
+             "so a hit's attack passes before the gain comes down |"]
+            if report.get("compressor_law") == "trailing_box_v1"
+            else []
+        ),
+        *(
+            [f"| vocal reverb steps back while the voice sings | ducked {report['reverb_duck']['depth_db']:.1f} dB "
+             f"while singing, whole return {report['reverb_duck'].get('makeup_db', 0.0):+.1f} dB: "
+             f"{report['reverb_duck'].get('gain_while_singing_db')} dB while singing, "
+             f"{report['reverb_duck'].get('gain_in_gaps_db')} dB in the gaps (medians); release "
+             f"{report['reverb_duck']['release_ms']:.0f} ms |"]
+            if report.get("reverb_duck") and "depth_db" in report["reverb_duck"]
             else []
         ),
         *(

@@ -76,6 +76,16 @@ BALANCE_SEND_LAW = "post_fader_v1"
 #: and brightness alike; the new one
 #: keeps the level contour between passages and does not fold back.
 SATURATION_LAW = "env_tanh_os4_v1"
+#: R119: every compressor's detector reads only the past (dsp.COMPRESSOR_LAWS);
+#: plans without the field keep the centred detector they were rendered with
+COMPRESSOR_LAW = "trailing_box_v1"
+#: R119: the vocal reverb is turned down while the voice sings and blooms in
+#: the gaps (dsp.voice_duck; the renderer reads this name from here); depth from the style's
+#: techniques.vocal_reverb_duck_db, release an eighth note (clamped)
+REVERB_DUCK_LAW = "voice_duck_v1"
+REVERB_DUCK_MAX_DB = 8.0
+REVERB_DUCK_RELEASE_MS = (120.0, 400.0)
+REVERB_DUCK_DEFAULT_RELEASE_MS = 250.0
 #: R117: drums that still move.  Measured on 46 MedleyDB songs the drum bus
 #: came out with 7-9 dB of level spread (p90-p10 of 50 ms windows) against
 #: 16.6 in the professional stems; taking out one stage at a time, the bus
@@ -2105,9 +2115,26 @@ def build_plan(
         # R117: saturation follows each passage's own level, oversampled
         # (dsp.SATURATION_LAWS); plans without it saturate as before
         "saturation_law": SATURATION_LAW,
+        "compressor_law": COMPRESSOR_LAW,
     }
     if delay_block is not None:
         plan["delay"] = delay_block
+    duck_depth = min(REVERB_DUCK_MAX_DB,
+                     float((preset.get("techniques") or {}).get("vocal_reverb_duck_db", 0.0)) * float(intensity))
+    sings_into_reverb = any(t["role"] in analyze.VOCAL_ROLES and t["id"] not in grouped_ids
+                            and float((t.get("sends") or {}).get("plate", 0.0)) > 0.0 for t in tracks)
+    if duck_depth >= 0.5 and sings_into_reverb:
+        tempo = tempo_of()
+        if tempo is not None:
+            release = min(max(30000.0 / float(tempo["bpm"]), REVERB_DUCK_RELEASE_MS[0]), REVERB_DUCK_RELEASE_MS[1])
+        else:
+            release = REVERB_DUCK_DEFAULT_RELEASE_MS
+        # makeup = depth: as wet as before while the voice sings (the owner:
+        # "vocal a bit dry", "the image must be big"), the tail blooms by the
+        # depth in the gaps -- the space grows without clouding the words
+        plan["reverb"]["duck"] = {"law": REVERB_DUCK_LAW, "depth_db": round(duck_depth, 2),
+                                  "makeup_db": round(duck_depth, 2),
+                                  "attack_ms": 20.0, "release_ms": round(release, 1)}
     if reverb_timing is not None:
         # the renderer reads decay_s / pre_delay_ms; timing is the receipt
         plan["reverb"]["decay_s"] = reverb_timing["decay_s"]

@@ -125,6 +125,9 @@ def test_a_bus_that_did_not_move_renders_like_before(session):
     for name in ("vocal", "drum", "bass"):
         held["buses"][name]["balance"]["max_cut_db"] = 0.0
         held["buses"][name]["balance"]["max_boost_db"] = 0.0
+    # R119: a ducked vocal reverb sums the vocal's sends apart by itself;
+    # the plan without the field is an older plan, so it has no duck either
+    held["reverb"].pop("duck", None)
     a, rep_a = render.render(stems, held)
     b, rep_b = render.render(stems, _without_follow(held))
     assert "send_follow" in rep_a and "send_follow" not in rep_b

@@ -223,6 +223,9 @@ def test_band_absolute_dbfs_uses_mean_channel_energy():
 
 def test_return_is_pure_convolution_before_fx_bus(sources,tmp_path):
     p=planner.build_plan(sources,planner.load_preset('pop_2020s'))
+    # R119: a ducked vocal reverb is exported ducked (what the mix had;
+    # test_reverb_duck.py); this test is about the fx bus not leaking in
+    p['reverb'].pop('duck',None)
     p['buses']['fx']={'comp':{'threshold_db':-35,'ratio':2,'attack_ms':15,'release_ms':120},
                        'saturation':.2,'width':.7}
     collected={};mix,report=render.render(sources,p,collect=collected)

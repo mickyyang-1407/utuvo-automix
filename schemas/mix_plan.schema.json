@@ -16,6 +16,7 @@
       "properties": {
         "manual_amount": {"type": "number", "minimum": 0, "maximum": 1},
         "ir_law": {"description": "The reverb's impulse response. noise_v1 (the default, what plans without this field were rendered with) is one noise burst decaying at one rate; plate_v2 decays by band, has early reflections, builds up over 15 ms and carries nothing below 200 Hz.", "enum": ["noise_v1", "plate_v2"]},
+        "duck": {"description": "R119 voice_duck_v1: the vocal's own reverb return is turned down by depth_db while the voice sings, then lifted by makeup_db (full at or above its singing level, none 10 dB below it) and blooms in the gaps; the detector holds and falls 20 dB per release_ms, the gain moves in over attack_ms. When absent the reverb is not ducked.", "type": "object", "required": ["law", "depth_db"], "properties": {"law": {"enum": ["voice_duck_v1"]}, "depth_db": {"type": "number", "minimum": 0, "maximum": 12}, "makeup_db": {"description": "Gain on the whole ducked return; makeup_db = depth_db keeps the voice as wet as without the duck while it sings and lets the tail bloom by depth_db in the gaps.", "type": "number", "minimum": 0, "maximum": 12}, "attack_ms": {"type": "number", "minimum": 1, "maximum": 200}, "release_ms": {"type": "number", "minimum": 20, "maximum": 2000}}, "additionalProperties": false},
         "timing": {"description": "Receipt of tempo_space_v1: decay_s and pre_delay_ms were locked to the song's tempo (the beat times the power of two nearest the style's own value, within a factor sqrt(2)). The renderer reads decay_s / pre_delay_ms, not this block.", "type": "object", "required": ["law", "bpm", "decay_s", "pre_delay_ms"], "properties": {"law": {"enum": ["tempo_space_v1"]}, "bpm": {"type": "number", "minimum": 20, "maximum": 400}, "style_decay_s": {"type": "number"}, "style_pre_delay_ms": {"type": "number"}, "decay_s": {"type": "number", "minimum": 0.3, "maximum": 8}, "pre_delay_ms": {"type": "number", "minimum": 5, "maximum": 150}, "decay_beats": {"type": "number"}, "pre_delay_beats": {"type": "number"}, "clamped": {"description": "Which values the safety range (0.3-8 s, 5-150 ms) moved off the beat grid.", "type": "array", "items": {"enum": ["decay_s", "pre_delay_ms"]}, "minItems": 1, "uniqueItems": true}}, "additionalProperties": false}
       },
       "additionalProperties": true
@@ -294,6 +295,10 @@
     "saturation_law": {
       "description": "R117: how every track's and bus's saturation (and the vocal character's) is shaped. env_tanh_os4_v1: a tanh normalised to the signal's own 30 ms peak envelope, at 4x the sample rate, RMS kept (the level contour between passages is kept; harmonics above the original Nyquist are filtered out instead of folding back). When absent: peak_tanh_v1, normalised to the single largest peak at the sample rate, as plans before R117 were rendered.",
       "enum": ["peak_tanh_v1", "env_tanh_os4_v1"]
+    },
+    "compressor_law": {
+      "description": "R119: how every compressor's detector (tracks, buses, the drum parallel copy, the vocal character's parallel copy, the master glue) reads the signal. trailing_box_v1: the attack and release windows end at the sample -- the detector reads only the past, so a hit's start passes for about the attack time and its body is held. When absent: centred_box_v1, windows centred on the sample (the detector sees half a window ahead), as plans before R119 were rendered.",
+      "enum": ["centred_box_v1", "trailing_box_v1"]
     },
     "delay": {
       "description": "The vocal delay that tracks' sends.delay feed. Locked to the song's tempo when it is clear (tempo records what was found), otherwise a slapback. The return is ducked while the sent signal plays and joins the fx bus.",

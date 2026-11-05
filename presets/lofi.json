@@ -69,6 +69,7 @@
     "max_saturation": 0.5
   },
   "techniques": {
+    "vocal_reverb_duck_db": 3.0,
     "kick_duck_db": 1.5,
     "drum_parallel": 0.2,
     "drum_forward_db": 0.0,
