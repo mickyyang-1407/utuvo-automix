@@ -808,6 +808,10 @@ def render(
     # R118: a group the user moved carries its sends along too
     user_trims = _user_trims(plan.get("buses") or {})
     follow |= {g for g in user_trims if g != "fx"}
+    headroom = plan.get("headroom_trim_db", {})
+    if headroom not in ({}, {"drum": -1}, {"drum": -3, "music": -3}):
+        raise RenderError("headroom_trim_db must be empty, drum -1 dB, or drum and music -3 dB")
+    follow.update(headroom)
     # R119: a ducked vocal reverb needs the vocal's own return
     reverb_duck = _reverb_duck_spec(plan)
     if reverb_duck:
@@ -1222,6 +1226,10 @@ def render(
         if name != "fx" and name in buses:
             buses[name] = buses[name] * dsp.db_to_lin(value)
             fader_db[name] = fader_db.get(name, 0.0) + value
+    for name, value in headroom.items():
+        if name in buses:
+            buses[name] = buses[name] * dsp.db_to_lin(value)
+            fader_db[name] = fader_db.get(name, 0.0) + value
 
     # R117: the followed returns join the fx bus at their bus's fader
     send_follow = None
@@ -1384,6 +1392,8 @@ def render(
         report["send_follow"] = send_follow
     if user_trims:
         report["user_trims"] = dict(user_trims)
+    if "headroom_trim_db" in plan:
+        report["headroom_trim_db"] = headroom
     report["limiter"] = limiting
     if "saturation_law" in plan:
         report["saturation_law"] = sat_law
@@ -1732,6 +1742,9 @@ def write_report(path: str, plan: dict, report: dict, stems: list) -> None:
             if report.get("user_trims")
             else []
         ),
+        *(["| automatic limiter headroom | "
+           + (", ".join(f"{name} {v:+.1f} dB" for name, v in report["headroom_trim_db"].items())
+              or "tighter limiter guard") + " |"] if "headroom_trim_db" in report else []),
         *(
             [f"| saturation | {report['saturation_law']}: follows each passage's level, 4x oversampled |"]
             if report.get("saturation_law") == "env_tanh_os4_v1"

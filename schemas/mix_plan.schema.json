@@ -137,6 +137,10 @@
         "$ref": "#/$defs/track"
       }
     },
+    "headroom_trim_db": {
+      "description": "A measured headroom correction after automatic balance, with effects following. Empty means only the limiter guard was tightened; absent means no correction.",
+      "enum": [{}, {"drum": -1}, {"drum": -3, "music": -3}]
+    },
     "buses": {
       "type": "object",
       "properties": {

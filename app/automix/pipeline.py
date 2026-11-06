@@ -15,6 +15,7 @@ correction that is actually about the reference.
 
 from __future__ import annotations
 
+import copy
 import math
 
 import numpy as np
@@ -216,6 +217,51 @@ def _timed_reverb(reverb_kwargs: dict, caller_keys: set, plan: dict) -> dict:
     return out
 
 
+def _try_headroom(stems, plan, audio, report, reverb_kwargs, collect):
+    """Keep a bounded retry only when it meets both mastering gates."""
+    buses = report.get("buses", {})
+    gr = report.get("limiter", {}).get("gain_reduction_p95_db")
+    if gr is None or gr >= -3.0:
+        return plan, audio, report
+    target = report["target_lufs"]
+    # A tiny miss can come from the guard's own convergence tolerance. For
+    # deeper misses, try a small fader correction before limiting harder.
+    drum = (report.get("part_balance") or {}).get("drum", {})
+    if gr >= -3.05:
+        trims = {}
+    elif not (buses.get("drum") and buses.get("bass")):
+        return plan, audio, report
+    elif (buses.get("music") and drum.get("applied_db", 0) <= -12
+          and drum["result_db"] > drum["target_db"]):
+        # Keep the drum-to-music fader relationship intact on this retry.
+        trims = {"drum": -3.0, "music": -3.0}
+    else:
+        trims = {"drum": -1.0}
+
+    candidate = copy.deepcopy(plan)
+    candidate["headroom_trim_db"] = trims
+    # The existing guard tolerates 0.05 dB of overshoot. Leave room for it
+    # while checking the measured result against the original 3 dB limit.
+    candidate["buses"]["master"]["limiter"]["max_gr_p95_db"] = 2.94
+    if "music" in trims:
+        candidate["buses"]["master"]["limiter"]["max_backoff_db"] = 1.70
+    planner.validate(candidate)
+    trial_collect = {} if collect is not None else None
+    trial_audio, trial = render.render(stems, candidate, reverb_kwargs, collect=trial_collect)
+    trial_gr = trial["limiter"].get("gain_reduction_p95_db")
+    if (trial_gr is None or trial_gr < -3.0 or not target - 1.0 <= trial["lufs"] <= target + 1.0
+            or trial["correlation"] < 0.3 or trial["true_peak_db"] > report["ceiling_db"]):
+        return plan, audio, report
+    _note_mono(trial, trial_audio, [])
+    mono = trial.get("mono_loss_db")
+    if mono is None or mono > 3.0:
+        return plan, audio, report
+    if collect is not None:
+        collect.clear()
+        collect.update(trial_collect)
+    return candidate, trial_audio, trial
+
+
 def mix(
     stems: list,
     preset: dict,
@@ -283,10 +329,14 @@ def mix(
     planner.validate(plan)
     reverb_kwargs = _timed_reverb(reverb_kwargs, caller_reverb, plan)
     audio, report = render.render(stems, plan, reverb_kwargs, collect=collect)
+    if (reference is None and not (trims or pans or group_trims)
+            and target_lufs is None and true_peak_db is None):
+        plan, audio, report = _try_headroom(stems, plan, audio, report, reverb_kwargs, collect)
     _note_crest(plan, preset, report)
     _note_balance(plan, report, plan.setdefault("warnings", []))
     _note_width(plan, report, plan.setdefault("warnings", []))
-    _note_mono(report, audio, plan.setdefault("warnings", []))
+    if "headroom_trim_db" not in plan:
+        _note_mono(report, audio, plan.setdefault("warnings", []))
 
     if reference is None or blend <= 0.0:
         return plan, audio, report
