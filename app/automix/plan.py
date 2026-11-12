@@ -221,6 +221,14 @@ KICK_DUCK_MAX_DB = 6.0
 KICK_DUCK_BAND_LAW = "kick_duck_band_v1"
 KICK_DUCK_KEY_LOWPASS_HZ = 120.0
 DRUM_PARALLEL_LAW = "parallel_v1"
+#: R128: the drum bus clipped before the master limiter (dsp.drum_clip): the
+#: ceiling sits techniques.drum_clip_db (times the intensity) under the bus's
+#: loud hits, with a DRUM_CLIP_KNEE_DB soft knee.  Under DRUM_CLIP_MIN_DB the
+#: block is not written; plans without it render as before.
+DRUM_CLIP_LAW = "drum_clip_os8_v1"
+DRUM_CLIP_KNEE_DB = 1.0
+DRUM_CLIP_MIN_DB = 0.25
+DRUM_CLIP_MAX_DB = 6.0
 VOCAL_DELAY_LAW = "tempo_delay_v1"
 #:   vocal_character_v1 -- weight and edge on the vocal bus: a parallel
 #:                    compressed copy, saturation, body/presence/air EQ
@@ -1333,6 +1341,11 @@ def _mix_techniques(preset: dict, intensity: float, stems: list[Stem], tracks: l
     if blend >= 0.05 and has("drum"):
         buses["drum"]["parallel"] = {"law": DRUM_PARALLEL_LAW, "blend": round(blend, 3), "ratio": 8.0,
                                      "threshold_offset_db": -10.0, "attack_ms": 2.0, "release_ms": 80.0}
+
+    clip = float(tech.get("drum_clip_db", 0.0)) * float(intensity)
+    if clip >= DRUM_CLIP_MIN_DB and has("drum"):
+        buses["drum"]["clip"] = {"law": DRUM_CLIP_LAW, "depth_db": round(min(DRUM_CLIP_MAX_DB, clip), 2),
+                                 "knee_db": DRUM_CLIP_KNEE_DB}
 
     spec = dict(tech.get("vocal_delay") or {})
     send = float(spec.get("send", 0.0)) * float(intensity)
@@ -2979,7 +2992,7 @@ def _engine_invariants(plan: dict) -> None:
             if bus["balance"].get("law") != wanted:
                 raise PlanError(f"buses.{name}.balance: law must be {wanted}")
         # the same for the other bus-only moves: each has one bus that reads it
-        for key, owner in (("duck", "bass"), ("parallel", "drum"), ("character", "vocal")):
+        for key, owner in (("duck", "bass"), ("parallel", "drum"), ("clip", "drum"), ("character", "vocal")):
             if name != owner and isinstance(bus, dict) and key in bus:
                 raise PlanError(f"buses.{name}.{key}: only the {owner} bus has one")
     if not plan["tracks"]:
@@ -3035,6 +3048,8 @@ def _engine_invariants(plan: dict) -> None:
             raise PlanError("buses.bass.duck: the plan has no bass track to duck")
     if (buses_in.get("drum") or {}).get("parallel") is not None and "drum" not in groups:
         raise PlanError("buses.drum.parallel: the plan has no drum track")
+    if isinstance(buses_in.get("drum"), dict) and "clip" in buses_in["drum"] and "drum" not in groups:
+        raise PlanError("buses.drum.clip: the plan has no drum track")
     # the renderer's own threshold: a send it would skip is no send
     sending = any(float(((t.get("sends") or {}).get("delay") or 0.0)) > SEND_MIN
                   for t in plan["tracks"] if isinstance(t, dict))

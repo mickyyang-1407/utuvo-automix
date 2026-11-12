@@ -504,6 +504,27 @@ def _parallel(sig: np.ndarray, sr: int, spec: dict, law: str = "centred_box_v1")
                  "crest_after_db": round(analyze._envelope_crest_db(out, sr), 2)}
 
 
+#: R128 drum-bus clipper (dsp.drum_clip): how far under the bus's loud hits the
+#: ceiling sits, and how far under the ceiling the soft knee begins
+DRUM_CLIP_BOUNDS = {"depth_db": (0.25, 6.0), "knee_db": (0.25, 6.0)}
+
+
+def _drum_clip(sig: np.ndarray, sr: int, spec: object) -> tuple[np.ndarray, dict]:
+    """The drum bus's loudest peaks clipped before the master limiter (R128)."""
+    if not isinstance(spec, dict) or spec.get("law") not in dsp.CLIP_LAWS:
+        raise RenderError(f"unknown drum clip law {(spec or {}).get('law') if isinstance(spec, dict) else spec!r}")
+    extra = set(spec) - {"law", *DRUM_CLIP_BOUNDS}
+    if extra:
+        raise RenderError(f"buses.drum.clip: unknown fields {sorted(extra)}")
+    for key, (lo, hi) in DRUM_CLIP_BOUNDS.items():
+        v = spec.get(key)
+        if type(v) not in (int, float) or not math.isfinite(v) or not lo <= v <= hi:
+            raise RenderError(f"buses.drum.clip.{key} must be a number between {lo} and {hi}")
+    if not np.any(sig):
+        return sig, {"law": spec["law"], "depth_db": float(spec["depth_db"]), "skipped": "silent drum bus"}
+    return dsp.drum_clip(sig, sr, spec)
+
+
 def _vocal_character(sig: np.ndarray, sr: int, spec: dict,
                      sat_law: str = "peak_tanh_v1", comp_law: str = "centred_box_v1") -> tuple[np.ndarray, dict]:
     """Density and weight on the vocal bus, after its leveling compressor.
@@ -1353,7 +1374,11 @@ def render(
         sat = float(spec.get("saturation", 0.0))
         if sat > 1e-3:
             sig = dsp.saturate(sig, sat, law=sat_law, sr=sr)
-        return _set_width(sig, float(spec.get("width", 1.0)))
+        sig = _set_width(sig, float(spec.get("width", 1.0)))
+        # R128: last on the drum bus, so what leaves it is what was clipped
+        if name == "drum" and "clip" in spec:
+            sig, moves["drum_clip"] = _drum_clip(sig, sr, spec["clip"])
+        return sig
 
     # with returns still to come (R117), the fx bus is processed once they
     # have joined it, after the balance step (which never looks at fx)
@@ -2201,6 +2226,10 @@ def _move_rows(moves: dict) -> list[str]:
     if (m := moves.get("drum_parallel")):
         rows.append(f"| drum parallel compression | envelope crest {m['crest_before_db']:.1f} -> "
                     f"{m['crest_after_db']:.1f} dB (blend {m['blend']:.2f}) |")
+    if (m := moves.get("drum_clip")) and "skipped" not in m:
+        rows.append(f"| drum peaks clipped before the limiter | loud hits {m['loud_hit_cut_db']:+.1f} dB (median), "
+                    f"loudest peak {m['peak_cut_db']:+.1f} dB (ceiling {m['depth_db']:.1f} dB under the loud hits), "
+                    f"{100 * m['time_clipped']:.2f}% of the time |")
     if (m := moves.get("vocal_delay")):
         lock = f"{m['division']} at {m['bpm']:.1f} BPM" if m.get("bpm") else str(m["division"])
         rows.append(f"| vocal delay | {lock} = {m['time_ms']:.0f} ms; return {m['return_vs_sent_db']:+.1f} dB "

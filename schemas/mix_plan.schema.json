@@ -1332,6 +1332,33 @@
           },
           "additionalProperties": false
         },
+        "clip": {
+          "description": "R128, drum bus only: the bus's loudest peaks softly clipped (8x oversampled) as the last step on the bus, before the master limiter sees them. The ceiling is depth_db under the bus's own loud hits (99th percentile of 10 ms peaks within 40 dB of the loudest); the soft knee begins knee_db under the ceiling. Plans without it are rendered as before.",
+          "type": "object",
+          "required": [
+            "law",
+            "depth_db",
+            "knee_db"
+          ],
+          "properties": {
+            "law": {
+              "enum": [
+                "drum_clip_os8_v1"
+              ]
+            },
+            "depth_db": {
+              "type": "number",
+              "minimum": 0.25,
+              "maximum": 6
+            },
+            "knee_db": {
+              "type": "number",
+              "minimum": 0.25,
+              "maximum": 6
+            }
+          },
+          "additionalProperties": false
+        },
         "character": {
           "description": "Vocal bus only: weight and edge after the bus compressor -- a parallel compressed copy (parallel_blend of the bus level, sum returned at the bus level), saturation, then body (220 Hz), presence (4 kHz) and air (11 kHz shelf) EQ. The vocal balance step that follows sets the level. Plans without it are rendered as before.",
           "type": "object",

@@ -1698,6 +1698,146 @@ def transient_shape(x: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dic
     return y, {"max_gain_db": round(float(g.max()), 2), "min_gain_db": round(float(g.min()), 2)}
 
 
+#: R128: the drum bus's loudest peaks are clipped before the master limiter
+#: sees them ("clip, then limit").  A drum hit's first millisecond is where
+#: the bus's peaks are, and a limiter that catches it turns the whole mix
+#: down for the 50-200 ms of its release -- the vocal and bass duck on every
+#: snare.  A clipper takes the same peak off in the waveform, for the length
+#: of the peak only.  The ceiling is set from the bus's own loud hits (the
+#: CLIP_REF_PCT percentile of 10 ms cell peaks over the cells within
+#: CLIP_ACTIVE_DB of the loudest), so a quiet bus and a loud one are clipped
+#: by the same dB.  Soft knee: below ceiling - knee_db nothing changes; above
+#: it the curve bends towards the ceiling (tanh), at 8x oversampling so the
+#: harmonics above the original Nyquist are filtered instead of folding back
+#: (a 9 kHz sine clipped 3 dB: the worst fold-back -81 dB; at 4x it was -56).
+CLIP_LAWS = ("drum_clip_os8_v1",)
+CLIP_CELL_MS = 10.0
+CLIP_REF_PCT = 99.0
+CLIP_ACTIVE_DB = 40.0
+CLIP_OVERSAMPLE = 8
+
+
+def _clip_ceiling_from_mag(mag: np.ndarray, sr: int, depth_db: float) -> float | None:
+    """drum_clip_ceiling on the bus's channel-linked magnitude (one value per frame)."""
+    n = mag.shape[0]
+    cell = max(1, int(sr * CLIP_CELL_MS / 1000.0))
+    cells = n // cell
+    if cells == 0:
+        return None
+    peaks = mag[:cells * cell].reshape(cells, cell).max(axis=1).astype(np.float64)
+    top = float(peaks.max())
+    if not top > EPS:
+        return None
+    active = peaks[peaks > top * 10.0 ** (-CLIP_ACTIVE_DB / 20.0)]
+    ref = float(np.percentile(active, CLIP_REF_PCT))
+    return ref * 10.0 ** (-float(depth_db) / 20.0)
+
+
+def drum_clip_ceiling(x: np.ndarray, sr: int, depth_db: float) -> float | None:
+    """The clip ceiling (linear): the bus's loud hits' peak, depth_db down; None when silent."""
+    return _clip_ceiling_from_mag(np.max(np.abs(x), axis=1) if x.ndim == 2 else np.abs(x), sr, depth_db)
+
+
+def _soft_clip_curve(u: np.ndarray, ceiling: float, knee: float) -> np.ndarray:
+    """Identity up to ``knee`` (linear), then a tanh bend that never passes ``ceiling``."""
+    m = np.abs(u)
+    over = m > knee
+    if not np.any(over):
+        return u
+    span = ceiling - knee
+    y = u.copy()
+    y[over] = np.sign(u[over]) * (knee + span * np.tanh((m[over] - knee) / span))
+    return y
+
+
+def _os_up(x: np.ndarray, factor: int) -> tuple[np.ndarray, int]:
+    """Band-limited upsampling by an integer factor on the input's own FFT grid
+    (resample_fft pads the *input* to the output's length when it upsamples,
+    which at 8x is a 64x inverse transform).  Returns the whole upsampled grid
+    (factor * nf frames, the zero padding included: cutting it off would leave
+    _os_down a different signal than the one that came up) and nf."""
+    nf = _next_fast_len(x.shape[0])
+    X = np.fft.rfft(x, nf, axis=0)
+    Y = np.zeros((factor * nf // 2 + 1,) + X.shape[1:], dtype=X.dtype)
+    Y[:X.shape[0]] = X
+    del X
+    if nf % 2 == 0:
+        # the old Nyquist bin stands for one component; on the longer grid a bin
+        # stands for a +/- pair, so it is halved (and doubled again on the way down)
+        Y[nf // 2] *= 0.5
+    return np.fft.irfft(Y, factor * nf, axis=0) * factor, nf
+
+
+def _os_down(y: np.ndarray, factor: int, nf: int, n: int) -> np.ndarray:
+    """The way back down from _os_up's whole grid: the band under the original Nyquist."""
+    Y = np.fft.rfft(y, factor * nf, axis=0)[:nf // 2 + 1]
+    if nf % 2 == 0:
+        Y[nf // 2] *= 2.0
+    return np.fft.irfft(Y, nf, axis=0)[:n] / factor
+
+
+def drum_clip(x: np.ndarray, sr: int, spec: dict, block_s: float = 8.0) -> tuple[np.ndarray, dict]:
+    """Law drum_clip_os8_v1 (see CLIP_LAWS): the peaks above the ceiling, softly clipped."""
+    if spec.get("law") not in CLIP_LAWS:
+        raise ValueError(f"unknown clip law {spec.get('law')!r}")
+    depth_db, knee_db = float(spec["depth_db"]), float(spec["knee_db"])
+    squeeze = x.ndim == 1
+    xs = x[:, None] if squeeze else x
+    n = xs.shape[0]
+    # one channel-linked magnitude serves the ceiling, the knee test and the receipt
+    mag = np.max(np.abs(xs), axis=1).astype(np.float64, copy=False)
+    ceiling = _clip_ceiling_from_mag(mag, sr, depth_db)
+    nothing = {"law": spec["law"], "depth_db": depth_db, "loud_hit_cut_db": 0.0, "peak_cut_db": 0.0,
+               "time_clipped": 0.0, "distortion_db": None}
+    if ceiling is None:
+        return x, nothing
+    knee = ceiling * 10.0 ** (-knee_db / 20.0)
+    # never empty: the loudest cell is at least the reference the ceiling hangs under
+    hot = mag > knee
+    os_ = CLIP_OVERSAMPLE
+    out = np.array(xs, dtype=np.float64, copy=True)
+    mag_out = mag.copy()
+    bs = max(1, int(block_s * sr))
+    # FFT resampling rings at a segment's cut ends: a quarter second of real
+    # context either side; blocks with nothing over the knee are left as they are
+    pad = min(n, int(0.25 * sr))
+    diff = energy = 0.0
+    for start in range(0, n, bs):
+        end = min(n, start + bs)
+        energy += float(np.sum(np.square(xs[start:end], dtype=np.float64)))
+        if not np.any(hot[start:end]):
+            continue
+        lo, hi = max(0, start - pad), min(n, end + pad)
+        up, nf = _os_up(xs[lo:hi].astype(np.float64), os_)
+        # only what the curve took off goes through the way back down, so the
+        # bus itself never makes a resampling round trip
+        cut = _soft_clip_curve(up, ceiling, knee) - up
+        del up
+        back = _os_down(cut, os_, nf, hi - lo)[start - lo:end - lo]
+        del cut
+        out[start:end] += back
+        diff += float(np.sum(back * back))
+        del back
+        mag_out[start:end] = np.max(np.abs(out[start:end]), axis=1)
+    # the loud hits (10 ms cells at or above the reference the ceiling hangs
+    # under): how far their peaks came down, median -- what the ear gets on a
+    # backbeat; peak_cut_db is the single loudest moment, which is often a
+    # pile-up several dB above the rest and comes down further
+    cell = max(1, int(sr * CLIP_CELL_MS / 1000.0))
+    cells = n // cell
+    c0 = mag[:cells * cell].reshape(cells, cell).max(axis=1)
+    c1 = mag_out[:cells * cell].reshape(cells, cell).max(axis=1)
+    loud = c0 >= ceiling * 10.0 ** (depth_db / 20.0) * (1.0 - 1e-12)
+    loud_cut = float(np.median(20.0 * np.log10(np.maximum(c1[loud], EPS) / c0[loud]))) if np.any(loud) else 0.0
+    receipt = {"law": spec["law"], "depth_db": depth_db,
+               "loud_hit_cut_db": round(loud_cut, 2),
+               "peak_cut_db": round(lin_to_db(float(mag_out.max())) - lin_to_db(float(mag.max())), 2),
+               "time_clipped": round(float(np.mean(hot)), 5),
+               "distortion_db": round(float(10.0 * np.log10(max(diff, 1e-30) / max(energy, 1e-30))), 1)}
+    out = out.astype(x.dtype, copy=False)
+    return (out[:, 0] if squeeze else out), receipt
+
+
 # ------------------------------------------- R122 dynamic resonance suppression
 
 #: R122: narrow, moving resonances on the lead vocal (harshness 2-8 kHz,

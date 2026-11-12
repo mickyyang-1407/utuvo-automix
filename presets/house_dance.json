@@ -82,6 +82,7 @@
     "kick_duck_db": 4.0,
     "drum_parallel": 0.125,
     "drum_transient": 0.5,
+    "drum_clip_db": 1.5,
     "drum_forward_db": 1.0,
     "bass_forward_db": 0.5,
     "vocal_lift_db": 0.0,
