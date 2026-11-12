@@ -217,7 +217,61 @@ def _timed_reverb(reverb_kwargs: dict, caller_keys: set, plan: dict) -> dict:
     return out
 
 
-def _try_headroom(stems, plan, audio, report, reverb_kwargs, collect):
+#: R126: the transient shaping pays for its own peaks.  Sharper hits are taller
+#: peaks, and on a dense song the master limiter would flatten them again --
+#: more limiting for nothing.  When the finished mix (after the headroom,
+#: adaptive-limiter and section-ride steps have had their say) still has its
+#: loudest 5% limited past the squash guard, the whole chain is run again with
+#: the shaping halved; if that is still past it, without the shaping -- which is
+#: the mix as it was before R126.
+#: The shaped mix is held half a dB inside the guard (3 dB), not at it: on ten
+#: real multitrack sessions the rest of the chain brought shaped Rock mixes back
+#: to exactly -2.98 / -3.00 from -1.8 / -2.2 without the shaping -- inside the
+#: guard, but a dB more limiting bought with the shaping.
+TRANSIENT_BUDGET_GR_DB = -2.5
+TRANSIENT_BUDGET_STEPS = (0.5, 0.0)
+#: halving the shaping bought 0.3-0.5 dB of limiting back on the measured songs
+TRANSIENT_BUDGET_HALF_REACH_DB = 0.5
+
+
+def _scaled_transients(plan: dict, scale: float, gr: float) -> dict:
+    """A copy of ``plan`` with every transient block scaled (0 = taken out), and the reason noted."""
+    candidate = copy.deepcopy(plan)
+    for t in candidate["tracks"]:
+        ts = t.get("transient")
+        if not ts:
+            continue
+        if scale > 0.0:
+            ts["attack_db"] = round(float(ts["attack_db"]) * scale, 2)
+            ts["sustain_db"] = round(float(ts["sustain_db"]) * scale, 2)
+            note = (f"transient shaping scaled to attack {ts['attack_db']:+.1f} dB: with all of it the limiter was at "
+                    f"{gr:.1f} dB on the loudest 5%")
+        else:
+            del t["transient"]
+            note = f"transient shaping left out: with it the limiter was at {gr:.1f} dB on the loudest 5%"
+        t.setdefault("evidence", []).append(note)
+    planner.validate(candidate)
+    return candidate
+
+
+def _with_transient_budget(plan: dict, run):
+    """``run(plan) -> (plan, audio, report)`` is the rest of the mix.  Run it; while its limiter is past
+    the guard and the plan it was given shapes transients, run it again from the same starting plan
+    with less shaping."""
+    out = run(plan)
+    if not any(t.get("transient") for t in plan["tracks"]):
+        return out
+    for scale in TRANSIENT_BUDGET_STEPS:
+        gr = out[2].get("limiter", {}).get("gain_reduction_p95_db")
+        if gr is None or gr >= TRANSIENT_BUDGET_GR_DB:
+            break
+        if scale > 0.0 and gr < TRANSIENT_BUDGET_GR_DB - TRANSIENT_BUDGET_HALF_REACH_DB:
+            continue  # half the shaping cannot buy that much back: do not spend a whole mix finding out
+        out = run(_scaled_transients(plan, scale, gr))
+    return out
+
+
+def _try_headroom(stems, plan, audio, report, reverb_kwargs, collect, premaster_capture=None):
     """Keep a bounded retry only when it meets both mastering gates."""
     buses = report.get("buses", {})
     gr = report.get("limiter", {}).get("gain_reduction_p95_db")
@@ -247,7 +301,9 @@ def _try_headroom(stems, plan, audio, report, reverb_kwargs, collect):
         candidate["buses"]["master"]["limiter"]["max_backoff_db"] = 1.70
     planner.validate(candidate)
     trial_collect = {} if collect is not None else None
-    trial_audio, trial = render.render(stems, candidate, reverb_kwargs, collect=trial_collect)
+    trial_capture = {} if premaster_capture is not None else None
+    kwargs = {"premaster_capture": trial_capture} if trial_capture is not None else {}
+    trial_audio, trial = render.render(stems, candidate, reverb_kwargs, collect=trial_collect, **kwargs)
     trial_gr = trial["limiter"].get("gain_reduction_p95_db")
     if (trial_gr is None or trial_gr < -3.0 or not target - 1.0 <= trial["lufs"] <= target + 1.0
             or trial["correlation"] < 0.3 or trial["true_peak_db"] > report["ceiling_db"]):
@@ -255,6 +311,257 @@ def _try_headroom(stems, plan, audio, report, reverb_kwargs, collect):
     _note_mono(trial, trial_audio, [])
     mono = trial.get("mono_loss_db")
     if mono is None or mono > 3.0:
+        return plan, audio, report
+    if collect is not None:
+        collect.clear()
+        collect.update(trial_collect)
+    if premaster_capture is not None:
+        premaster_capture.update(trial_capture)
+    return candidate, trial_audio, trial
+
+
+def _try_adaptive_release(plan, audio, report, premaster_capture):
+    original = report["limiter"]
+    original_p95 = original.get("gain_reduction_p95_db")
+    if original_p95 is None or original_p95 > -0.25:
+        return plan, audio, report
+    x = premaster_capture["audio"]
+    sr = int(report["sample_rate"])
+    ceiling = report["ceiling_db"]
+    target = report["target_lufs"]
+    reference = dsp.loudness_lufs(audio, sr)
+    calibration = float(np.clip(reference, target - 0.995, target + 0.995))
+    if abs(calibration - reference) > 0.02:
+        return plan, audio, report
+    tolerance = 0.004 if abs(calibration - target) > 0.98 else 0.02
+    drive = report["master_gain_db"]
+    best = None
+    for _ in range(7):
+        if not -60 <= drive <= 60:
+            break
+        y, effective_drive = render._apply_adaptive_limiter(x, sr, ceiling, drive)
+        lufs = dsp.loudness_lufs(y, sr)
+        error = calibration - lufs
+        if best is None or abs(error) < best[0]:
+            best = abs(error), y, lufs, drive, effective_drive
+        if abs(error) <= tolerance:
+            break
+        drive += error / 0.55
+    if best is None:
+        return plan, audio, report
+    _, y, lufs, drive, effective_drive = best
+    if abs(lufs - reference) > 0.02 or abs(lufs - target) > 1.0:
+        return plan, audio, report
+    trial_limiter = render._limiter_receipt(x, dsp.db_to_lin(effective_drive), y, sr,
+                                            dsp.ADAPTIVE_LIMITER_LAW, unrounded=True)
+    p95 = trial_limiter.get("gain_reduction_p95_db")
+    # A near miss can leave a failing reference in place even though slightly
+    # less drive meets both the style's loudness band and the pressure limit.
+    if original_p95 < -3.0 and p95 is not None and -3.05 <= p95 < -3.0 and drive >= -59.9:
+        drive -= 0.10
+        y, effective_drive = render._apply_adaptive_limiter(x, sr, ceiling, drive)
+        lufs = dsp.loudness_lufs(y, sr)
+        if not reference - 0.10 <= lufs <= reference + 0.02 or abs(lufs - target) > 1.0:
+            return plan, audio, report
+        trial_limiter = render._limiter_receipt(x, dsp.db_to_lin(effective_drive), y, sr,
+                                                dsp.ADAPTIVE_LIMITER_LAW, unrounded=True)
+        p95 = trial_limiter.get("gain_reduction_p95_db")
+    if (p95 is None or p95 < -3.0 or (original_p95 >= -3.0 and p95 - original_p95 < 0.25)
+            or trial_limiter["time_over_1db"] > original["time_over_1db"]
+            or dsp.true_peak_db(y, sr) > ceiling or dsp.stereo_correlation(y) < 0.3):
+        return plan, audio, report
+    mono = {"lufs": lufs, "sample_rate": sr}
+    _note_mono(mono, y, [])
+    if mono.get("mono_loss_db", math.inf) > 3.0:
+        return plan, audio, report
+
+    candidate = copy.deepcopy(plan)
+    candidate["buses"]["master"]["limiter"].update(law=dsp.ADAPTIVE_LIMITER_LAW, drive_db=drive)
+    planner.validate(candidate)
+    # The selected limiter only changes the final stereo waveform. The track
+    # and return exports already came from the selected premaster.
+    warnings = report["warnings"][:premaster_capture["warning_count"]]
+    receipt = dict(report, warnings=warnings)
+    receipt.update(render._master_report(y, sr, target, ceiling, effective_drive, 1, warnings))
+    receipt["limiter"] = dict(trial_limiter, gain_reduction_p95_db=round(p95, 2))
+    receipt["mono_loss_db"] = mono["mono_loss_db"]
+    receipt["mono_diagnostic"] = mono["mono_diagnostic"]
+    return candidate, y, receipt
+
+
+#: R124 (Claude): section rides.  When the adaptive limiter alone cannot meet
+#: both mastering gates (loudest 5% within 3 dB of gain reduction, loudness
+#: within the style target +-1 LU), ride the drum and music buses down (never
+#: the vocal) in the 15 s blocks where the limiter still works hardest, then
+#: search the drive again.  Measured on Velvet Curtain (House, Rock, Trap),
+#: Toynbee Suite and Reggae with the vocal bus opened: all passed with the
+#: vocal 2-3 dB more open.
+SECTION_RIDE_BLOCK_S = 15.0
+SECTION_RIDE_FIRST_DB = -2.0
+SECTION_RIDE_STEP_DB = -0.5
+SECTION_RIDE_FLOOR_DB = -3.0
+SECTION_RIDE_MAX_SHARE = 0.34
+SECTION_RIDE_ROUNDS = 5
+SECTION_RIDE_GATE_DB = -3.0
+#: the schema's move limits (mix_plan.schema.json music_automation / drum_automation)
+SECTION_RIDE_MAX_MUSIC_MOVES = 16
+SECTION_RIDE_MAX_DRUM_MOVES = 128
+#: aim this far inside the -1 LU edge, so the final full render (same meter,
+#: rounded report) and an outside meter on the written WAV keep a margin
+SECTION_RIDE_LOUDNESS_MARGIN_LU = 0.90
+#: best effort: when no round meets the -3 dB gate, the least-squashed round
+#: is still used if the loudest 5% is pressed at least this much less than
+#: the mix it replaces (loudness band and safety checks unchanged).  Velvet
+#: Curtain / Metal: no round passes, yet the last one sits near -3.1 dB
+#: where the fallback was -6.0 dB.
+SECTION_RIDE_BEST_EFFORT_GAIN_DB = 1.0
+
+
+def _limit_trial(x, sr, ceiling, drive):
+    y, effective = render._apply_adaptive_limiter(x, sr, ceiling, drive)
+    rec = render._limiter_receipt(x, dsp.db_to_lin(effective), y, sr, dsp.ADAPTIVE_LIMITER_LAW, unrounded=True)
+    return y, effective, dsp.loudness_lufs(y, sr), rec.get("gain_reduction_p95_db", 0.0)
+
+
+def _drive_for(x, sr, ceiling, want, start):
+    """Secant search for the drive that lands on ``want`` LUFS."""
+    d, best, prev = start, None, None
+    for _ in range(10):
+        trial = _limit_trial(x, sr, ceiling, d)
+        if best is None or abs(want - trial[2]) < abs(want - best[1][2]):
+            best = (d, trial)
+        if abs(want - trial[2]) <= 0.01:
+            break
+        slope = 0.75
+        if prev is not None and abs(d - prev[0]) > 1e-6:
+            slope = min(1.2, max(0.2, (trial[2] - prev[1]) / (d - prev[0])))
+        prev = (d, trial[2])
+        d += (want - trial[2]) / slope
+    return best
+
+
+def _search_drive(x, sr, ceiling, target):
+    """The loudest drive with p95 >= the gate, loudness inside the band.
+    Returns (passing (drive, trial) or None, (drive, trial) at the lowest legal loudness)."""
+    lo = _drive_for(x, sr, ceiling, target - SECTION_RIDE_LOUDNESS_MARGIN_LU, target - dsp.loudness_lufs(x, sr))
+    if lo[1][3] < SECTION_RIDE_GATE_DB:
+        return None, lo
+    hi = _drive_for(x, sr, ceiling, target, lo[0])
+    if hi[1][3] >= SECTION_RIDE_GATE_DB:
+        return hi, lo
+    a, b = lo, hi
+    for _ in range(6):
+        d = (a[0] + b[0]) / 2
+        trial = _limit_trial(x, sr, ceiling, d)
+        if trial[3] >= SECTION_RIDE_GATE_DB:
+            a = (d, trial)
+        else:
+            b = (d, trial)
+    return a, lo
+
+
+def _over_blocks(x, y, effective, sr):
+    w = max(1, int(0.05 * sr))
+    n = (min(len(x), len(y)) // w) * w
+    if n == 0:
+        return {}
+    pb = np.mean((np.asarray(x[:n], dtype=np.float64) ** 2).reshape(n // w, w, -1), axis=(1, 2)) * dsp.db_to_lin(effective) ** 2
+    pa = np.mean((np.asarray(y[:n], dtype=np.float64) ** 2).reshape(n // w, w, -1), axis=(1, 2))
+    live = pb > 1e-9
+    gr = 10.0 * np.log10(np.maximum(pa, 1e-20) / np.maximum(pb, 1e-20))
+    counts = {}
+    for i in np.where(live & (gr < SECTION_RIDE_GATE_DB))[0]:
+        b = int(i * 0.05 // SECTION_RIDE_BLOCK_S)
+        counts[b] = counts.get(b, 0) + 1
+    return counts
+
+
+def _try_section_rides(stems, plan, audio, report, reverb_kwargs, collect, premaster_capture):
+    gr = (report.get("limiter") or {}).get("gain_reduction_p95_db")
+    target = report["target_lufs"]
+    if gr is None or (gr >= SECTION_RIDE_GATE_DB and abs(report["lufs"] - target) <= 1.0):
+        return plan, audio, report
+    groups = {planner.ROLE_GROUP.get(t.get("role"), "music") for t in plan["tracks"]}
+    if not {"drum", "music"} <= groups or premaster_capture.get("audio") is None:
+        return plan, audio, report
+    sr = int(report["sample_rate"])
+    ceiling = report["ceiling_db"]
+    x = np.asarray(premaster_capture["audio"])
+    # never more than the share of the song, nor more moves than the schema
+    # allows next to the moves the plan already has (music: 16, drum: 128)
+    blocks_total = min(int(len(x) / sr / SECTION_RIDE_BLOCK_S * SECTION_RIDE_MAX_SHARE),
+                       SECTION_RIDE_MAX_MUSIC_MOVES - len((plan.get("music_automation") or {}).get("moves", [])),
+                       SECTION_RIDE_MAX_DRUM_MOVES - len((plan.get("drum_automation") or {}).get("moves", [])))
+    if blocks_total <= 0:
+        return plan, audio, report
+    # only the plain fader laws: a band-limited drum ride (drum_high_cosine_v1)
+    # has its own ordering and depth rules, and these moves are full-band
+    for bus in ("drum", "music"):
+        law = (plan.get(f"{bus}_automation") or {}).get("law", f"{bus}_cosine_v1")
+        if law != f"{bus}_cosine_v1":
+            return plan, audio, report
+    found, lo = _search_drive(x, sr, ceiling, target)
+    trims: dict[int, float] = {}
+    candidate = copy.deepcopy(plan) if found is not None else None  # the drive alone may do it
+    # the least-squashed attempt so far, at the quiet edge of the loudness band
+    fallback = (copy.deepcopy(plan), lo)
+    for _ in range(SECTION_RIDE_ROUNDS):
+        if found is not None:
+            break
+        counts = _over_blocks(x, lo[1][0], lo[1][1], sr)
+        over = sum(counts.values())
+        before = dict(trims)
+        for b in trims:
+            trims[b] = max(SECTION_RIDE_FLOOR_DB, trims[b] + SECTION_RIDE_STEP_DB)
+        got = 0
+        for b in sorted(counts, key=lambda k: -counts[k]):
+            if got >= 0.5 * over or len(trims) >= blocks_total:
+                break
+            if b not in trims:
+                trims[b] = SECTION_RIDE_FIRST_DB
+                got += counts[b]
+        if not trims or trims == before:  # nothing new to try
+            break
+        candidate = copy.deepcopy(plan)
+        moves = [{"start_frame": round(b * SECTION_RIDE_BLOCK_S * sr),
+                  "end_frame": min(len(x), round((b + 1) * SECTION_RIDE_BLOCK_S * sr)),
+                  "fade_frames": sr, "trim_db": trims[b]} for b in sorted(trims)]
+        moves = [m for m in moves if m["end_frame"] - m["start_frame"] > 2 * m["fade_frames"]]
+        if not moves:
+            return plan, audio, report
+        for bus in ("drum", "music"):
+            auto = candidate.setdefault(f"{bus}_automation", {"law": f"{bus}_cosine_v1", "moves": []})
+            auto["moves"] = auto["moves"] + copy.deepcopy(moves)
+        try:
+            planner.validate(candidate)
+        except Exception:  # PlanError or the schema's ValidationError: an optional step falls back
+            return plan, audio, report
+        capture = {}
+        render.render(stems, candidate, reverb_kwargs, premaster_capture=capture)
+        x = np.asarray(capture["audio"])
+        found, lo = _search_drive(x, sr, ceiling, target)
+        if lo[1][3] > fallback[1][1][3]:
+            fallback = (candidate, lo)
+    need = SECTION_RIDE_GATE_DB
+    if found is None:
+        # no round met the gate: take the least-squashed one if it is clearly
+        # better than the mix it would replace, else keep that mix
+        need = gr + SECTION_RIDE_BEST_EFFORT_GAIN_DB
+        if fallback[1][1][3] < need:
+            return plan, audio, report
+        candidate, found = fallback
+    if candidate is None:
+        return plan, audio, report
+    candidate["buses"]["master"]["limiter"].update(law=dsp.ADAPTIVE_LIMITER_LAW, drive_db=float(found[0]))
+    planner.validate(candidate)
+    trial_collect = {} if collect is not None else None
+    trial_audio, trial = render.render(stems, candidate, reverb_kwargs, collect=trial_collect)
+    trial_gr = trial["limiter"].get("gain_reduction_p95_db")
+    if (trial_gr is None or trial_gr < need or abs(trial["lufs"] - target) > 1.0
+            or trial["correlation"] < 0.3 or trial["true_peak_db"] > ceiling):
+        return plan, audio, report
+    _note_mono(trial, trial_audio, [])
+    if trial.get("mono_loss_db", math.inf) > 3.0:
         return plan, audio, report
     if collect is not None:
         collect.clear()
@@ -281,10 +588,13 @@ def mix(
     reverb_amount: float | None = None,
     capture_groups: list | None = None,
     group_trims: dict | None = None,
+    adaptive_release: bool = False,
 ) -> tuple[dict, "object", dict]:
     """Return ``(plan, audio, report)``."""
     reverb_amount = planner._manual_reverb_amount(reverb_amount, optional=True)
     reference_pass = reference is not None and blend > 0.0
+    if adaptive_release and reference is not None:
+        raise planner.PlanError("adaptive release trials require a mix without reference matching")
     try:
         balance_preserve = balancemod.legacy_api_balance(balance_preserve)
         decision = balancemod.resolve(stems, reference, source_balance_profile, balance_preserve)
@@ -328,10 +638,23 @@ def mix(
     # reference pass -- the second one is checked the same way below.
     planner.validate(plan)
     reverb_kwargs = _timed_reverb(reverb_kwargs, caller_reverb, plan)
-    audio, report = render.render(stems, plan, reverb_kwargs, collect=collect)
-    if (reference is None and not (trims or pans or group_trims)
-            and target_lufs is None and true_peak_db is None):
-        plan, audio, report = _try_headroom(stems, plan, audio, report, reverb_kwargs, collect)
+
+    def _finish(plan):
+        premaster_capture = {} if adaptive_release else None
+        kwargs = {"premaster_capture": premaster_capture} if adaptive_release else {}
+        audio, report = render.render(stems, plan, reverb_kwargs, collect=collect, **kwargs)
+        if (reference is None and not (trims or pans or group_trims)
+                and target_lufs is None and true_peak_db is None):
+            plan, audio, report = _try_headroom(stems, plan, audio, report, reverb_kwargs, collect, **kwargs)
+        if premaster_capture is not None:
+            plan, audio, report = _try_adaptive_release(plan, audio, report, premaster_capture)
+            if reference is None and not (trims or pans or group_trims):
+                plan, audio, report = _try_section_rides(stems, plan, audio, report, reverb_kwargs, collect,
+                                                         premaster_capture)
+            premaster_capture.clear()
+        return plan, audio, report
+
+    plan, audio, report = _with_transient_budget(plan, _finish)
     _note_crest(plan, preset, report)
     _note_balance(plan, report, plan.setdefault("warnings", []))
     _note_width(plan, report, plan.setdefault("warnings", []))
@@ -374,7 +697,8 @@ def mix(
     # satisfy the schema must not produce audio either.
     planner.validate(plan)
     reverb_kwargs = _timed_reverb(reverb_kwargs, caller_reverb, plan)
-    audio, report = render.render(stems, plan, reverb_kwargs, collect=collect)
+    plan, audio, report = _with_transient_budget(
+        plan, lambda candidate: (candidate, *render.render(stems, candidate, reverb_kwargs, collect=collect)))
     _note_crest(plan, preset, report)
     _note_balance(plan, report, plan.setdefault("warnings", []))
     _note_width(plan, report, plan.setdefault("warnings", []))

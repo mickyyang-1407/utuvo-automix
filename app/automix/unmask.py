@@ -13,6 +13,8 @@ TARGET_ROLES = frozenset({'guitar_electric', 'guitar_acoustic', 'keys', 'piano',
 MODE = 'frozen_vocal_unmask_v1'
 METHOD = 'stereo_mean_square_hann100ms_hop50ms_v1'
 MAX_TARGETS = 2
+MUSIC_MID_DIP_LAW = "music_mid_dip_v1"
+MUSIC_MID_DIP_BAND = ("peaking", 2250.0, -1.5, 1.2)
 
 
 def frame_power(audio: np.ndarray, sr: int, frames: int) -> dict:
@@ -186,7 +188,21 @@ def validate(block: dict, role: str, sr: int, duration: float, source_ids: set[s
     ids = block.get('source_ids')
     if not isinstance(ids, list) or not ids or any(not isinstance(i, str) or i not in source_ids for i in ids) or len(set(ids)) != len(ids):
         raise ValueError('dynamic_eq requires unique known priority source_ids')
-    points = block.get('curve')
+    _validate_curve(block.get('curve'), duration)
+
+
+def validate_music_mid_dip(block: dict, sr: int, duration: float) -> None:
+    if not isinstance(block, dict) or set(block) != {"law", "curve"} or block["law"] != MUSIC_MID_DIP_LAW:
+        raise ValueError("unsupported music_mid_dip law or settings")
+    if sr * 0.49 < MUSIC_MID_DIP_BAND[1]:
+        raise ValueError("sample rate does not support the music_mid_dip band")
+    points = block["curve"]
+    _validate_curve(points, duration)
+    if points[0][1] != 0 or points[-1][1] != 0:
+        raise ValueError("music_mid_dip must start and end at zero")
+
+
+def _validate_curve(points: list, duration: float) -> None:
     if not isinstance(points, list) or not 2 <= len(points) <= 100000:
         raise ValueError('dynamic_eq curve needs 2..100000 points')
     previous = -1.0

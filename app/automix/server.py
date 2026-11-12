@@ -1326,6 +1326,10 @@ def _worker(payload: dict, conn) -> None:
             collect=collect,
             reverb_amount=payload.get("reverb_amount"),
             capture_groups=payload.get("capture_groups"),
+            # R124 stage B: the App masters with the adaptive-release limiter and, when a
+            # dense song still fails the mastering gates, section rides.  A reference
+            # match keeps the earlier path (pipeline.mix refuses the combination).
+            adaptive_release=ref is None,
         )
 
         progress("writing")

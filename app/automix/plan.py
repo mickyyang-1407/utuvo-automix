@@ -131,12 +131,46 @@ DRUM_TRACK_MIN_ATTACK_MS = 25.0
 #: the receipt each changed drum compressor carries: what the style's dial
 #: alone would have written (the renderer does not read it)
 DRUM_OPEN_LAW = "drum_open_v1"
+#: R124: the vocal bus, the same fix as the drum bus above.  The owner on Velvet
+#: Curtain: "Vocal完全Overcompressed" (but "厚度以及飽滿是對的").  The vocal
+#: bus threshold sat 2.3-3.7 dB under the bus's average level, so it pressed
+#: on almost every sung syllable: on the 46 MUSDB vocals that one stage alone
+#: took a median 3.8-5.4 dB of sung-window level spread (p95-p10 of 100 ms
+#: RMS), and the planned chain left 5-8 dB against 17 in the source vocals.
+#: New plans: the threshold sits above the average and the attack is quick,
+#: so the bus only catches the loudest syllables.  The thickness (the vocal
+#: character's parallel copy, saturation, tone) is left as it was.  On six
+#: holdout songs this gave +1.9..+2.8 dB of vocal spread with limiter p95 and
+#: loudness within 0.12 dB / 0.02 LU (HOLDOUT-VOCAL-BUS-PEAK-*.json).  Plain
+#: compressor numbers in the plan, so older plans render as they were.
+VOCAL_BUS_THRESHOLD_OFFSET_DB = 4.0
+VOCAL_BUS_MAX_ATTACK_MS = 10.0
+VOCAL_OPEN_LAW = "vocal_bus_open_v1"
 #: R118: the few faders a user gets after the mix ("vocal a little louder"):
 #: one dB offset per group, applied by the renderer after every automatic
 #: balance, the group's reverb and delay moving with it.  Absent = 0 dB, so
 #: plans without them render as before.
 USER_TRIM_GROUPS = ("vocal", "drum", "bass", "music", "fx")
 USER_TRIM_MAX_DB = 12.0
+
+#: R126: the drum mics' hits put back (dsp.transient_shape).  The track
+#: compressor and the saturation round a hit off; this adds attack_db to the
+#: first few milliseconds of every hit and (for the ringing drums) takes
+#: sustain_db off the decay, the same dB for a soft and a loud hit.  The dB per
+#: role below are for techniques.drum_transient = 1.0; the style's number times
+#: the intensity scales them.  Cymbals, hats and rooms are left alone: more
+#: attack there is harshness, less sustain is a smaller kit.
+TRANSIENT_LAW = "transient_diff_env_v1"
+TRANSIENT = {"attack_ms": 15.0, "sustain_ms": 600.0, "range_db": 35.0}
+#: role -> (attack dB, sustain dB) at drum_transient = 1.0
+#: (a whole-kit stem gets half of a close mic's: measured on 15 professional
+#: drum stems, +1.5 dB there brings the bus's hit-to-body ratio from 1.7 dB
+#: under the professional stems to 0.4 dB under them for 0.4 dB more limiting
+#: on the loudest 5%; +3 dB costs 0.9 dB of limiting and the mix gains nothing)
+TRANSIENT_ROLE_DB = {"kick": (3.0, 0.0), "snare": (4.0, -1.0), "toms": (2.0, -2.0),
+                     "drums_full": (1.5, 0.0), "percussion": (1.5, 0.0)}
+TRANSIENT_MAX_DB = 6.0
+TRANSIENT_MIN_DB = 0.25
 
 
 def _user_trims(group_trims: dict | None) -> dict:
@@ -757,7 +791,71 @@ def _side_hint(track_id: str) -> tuple[int, bool]:
     return 0, len(sides) > 1
 
 
-def _spread_duplicate_pans(tracks: list[dict]) -> None:
+#: R125: a side letter glued to the word -- "OHL" / "OHR", "RoomL" / "RoomR",
+#: "unisL" / "unisR", "GtrL2" / "GtrR2" -- reported 2026-11-10 on a real
+#: session ("只要檔案有 L R，就是極左極右，你還是沒做到": the overheads sat at
+#: +-0.10 and both unison vocals on the right).  A trailing l / r is the end of
+#: "vocal" and "guitar" too, so a glued letter only counts when the session
+#: also holds the same name with the other letter.
+_GLUED_SIDE_RE = re.compile(r"^(.*?)(left|right|l|r)(\d*)$")
+_GLUED_SWAP = {"l": "r", "r": "l", "left": "right", "right": "left"}
+_TOKEN_KEEP_SPLIT = re.compile(r"([\s_.\-]+)")
+
+
+def _glued_side_hints(track_ids) -> dict:
+    """Sides for names whose L / R is glued to a word, proven by the partner file."""
+    ids = [str(tid) for tid in track_ids]
+    low = {}
+    for tid in ids:
+        low.setdefault(tid.lower(), tid)
+    out = {}
+    for tid in ids:
+        lid = tid.lower()
+        if _side_hint(tid) != (0, False):
+            continue  # a free-standing token already answered (or contradicted itself)
+        parts = _TOKEN_KEEP_SPLIT.split(lid)
+        sides = set()
+        for i in range(0, len(parts), 2):
+            m = _GLUED_SIDE_RE.match(parts[i])
+            if not m:
+                continue
+            word, side, digits = m.groups()
+            partner = "".join(parts[:i] + [word + _GLUED_SWAP[side] + digits] + parts[i + 1:])
+            if partner != lid and partner in low and _side_hint(low[partner]) == (0, False):
+                sides.add(_SIDE_TOKENS[side])
+        if len(sides) == 1:
+            out[tid] = sides.pop()
+    return out
+
+
+#: R125: "BV 1-1" / "BV 1-2" are two takes of one part.  Slots handed out in
+#: name order put both takes of part 1 on the left and both of part 3 on the
+#: right (reported 2026-11-10: backing vocals "不夠平均（左邊偏大）"); a part and
+#: its double go to mirrored places instead, the first part widest.
+_TAKE_RE = re.compile(r"(\d+)-(\d+)")
+#: where the first doubled part sits, and how close to the centre a later one may come
+TAKE_PAIR_OUTER = 0.7
+TAKE_PAIR_FLOOR = 0.3
+
+
+def _take_pairs(ids: list[str]) -> list[tuple[str, str]]:
+    """Ids that differ only in the take number of one "part-take" token, as (take 1, take 2)."""
+    groups: dict[tuple, list[tuple[int, str]]] = {}
+    for tid in ids:
+        matches = list(_TAKE_RE.finditer(tid))
+        if len(matches) != 1:
+            continue
+        m = matches[0]
+        groups.setdefault((tid[:m.start(2)], tid[m.end(2):]), []).append((int(m.group(2)), tid))
+    pairs = []
+    for key in sorted(groups):
+        members = sorted(groups[key])
+        if len(members) == 2 and members[0][0] != members[1][0]:
+            pairs.append((members[0][1], members[1][1]))
+    return pairs
+
+
+def _spread_duplicate_pans(tracks: list[dict], stereo_ids=frozenset()) -> None:
     """Place same-role tracks: named sides stay put, the rest spread around centre.
 
     A role's pan is a single number, so two string parts end up on top of each
@@ -780,8 +878,17 @@ def _spread_duplicate_pans(tracks: list[dict]) -> None:
     for t in tracks:
         by_role.setdefault(t["role"], []).append(t)
 
+    # a glued letter is read off mono files only: hard-panning a file whose two
+    # channels differ would switch one of them off on the word of a suffix
+    glued = {tid: side for tid, side in _glued_side_hints([t.get("id", "") for t in tracks]).items()
+             if tid not in stereo_ids}
+
+    def hint(t):
+        side, ambiguous = _side_hint(t.get("id", ""))
+        return (glued.get(t.get("id", ""), 0), False) if side == 0 and not ambiguous else (side, ambiguous)
+
     for t in tracks:
-        side, _ambiguous = _side_hint(t.get("id", ""))
+        side, _ambiguous = hint(t)
         if side < 0:
             t["pan"] = -NAMED_SIDE_PAN
             t.setdefault("evidence", []).append("panned hard left from the file name")
@@ -794,7 +901,17 @@ def _spread_duplicate_pans(tracks: list[dict]) -> None:
             continue
         automatic = []
         for t in group:
-            side, ambiguous = _side_hint(t.get("id", ""))
+            side, ambiguous = hint(t)
+            if side == 0 and t.get("id", "") in stereo_ids:
+                # R125: the pan of a stereo file is a balance control -- a slot at
+                # -1.0 switches its right channel off.  A file whose two channels
+                # differ already has a place for everything in it (reported
+                # 2026-11-10: seven stereo guitars spread like mono ones, the
+                # outer ones left with one channel).
+                t["pan"] = 0.0
+                t.setdefault("evidence", []).append(
+                    "stereo file: kept on its own left and right instead of a spread slot")
+                continue
             if side == 0:
                 automatic.append(t)
                 if ambiguous:
@@ -809,15 +926,92 @@ def _spread_duplicate_pans(tracks: list[dict]) -> None:
                 "centred: the only automatically placed track of this role"
             )
         elif count > 1:
-            for i, t in enumerate(automatic):
-                pan = round(
-                    max(-1.0, min(1.0, (i - (count - 1) / 2.0) * SPREAD_STEP)), 2
-                )
+            by_id = {str(t.get("id", "")): t for t in automatic}
+            placed: dict[str, tuple[float, str]] = {}
+            for k, (first, second) in enumerate(_take_pairs(sorted(by_id))):
+                # a part and its double: a wide mirrored pair, each further part a step in
+                wide = round(max(TAKE_PAIR_FLOOR, TAKE_PAIR_OUTER - k * SPREAD_STEP), 2)
+                placed[first] = (-wide, f"mirrored against its double {second}")
+                placed[second] = (wide, f"mirrored against its double {first}")
+            singles = [t for t in automatic if str(t.get("id", "")) not in placed]
+            for t in automatic:
+                tid = str(t.get("id", ""))
+                if tid in placed:
+                    pan, why = placed[tid]
+                    t["pan"] = pan
+                    t.setdefault("evidence", []).append(f"spread to {pan:+.2f}, {why}")
+            for i, t in enumerate(singles):
+                pan = round(max(-1.0, min(1.0, (i - (len(singles) - 1) / 2.0) * SPREAD_STEP)), 2)
                 t["pan"] = pan
                 t.setdefault("evidence", []).append(
                     f"spread to {pan:+.2f} around the centre because {count} "
                     f"tracks share the {role} role"
+                    + (f" ({len(singles)} of them without a double)" if placed else "")
                 )
+
+
+#: R125: the backing vocals as a stack.  The hierarchy rule holds every
+#: backing vocal 4 dB under the lead one track at a time, and a stack adds up:
+#: on the session reported 2026-11-10 ("BV 有一點太大") eight of them, each
+#: 5-8 dB under the lead, summed to 2.0 dB *over* it.  The sum of the backing
+#: vocals is held this far under the sum of the lead vocals, measured over the
+#: 3 s windows where both sing.
+BACKING_STACK_GAP_DB = 2.0
+BACKING_STACK_WINDOW_S = 3.0
+BACKING_STACK_ACTIVE_DB = 25.0
+BACKING_STACK_SILENCE_DB = -70.0
+
+
+def _window_power_db(x: np.ndarray, sr: int) -> np.ndarray:
+    k = max(1, int(BACKING_STACK_WINDOW_S * sr))
+    m = len(x) // k
+    if m == 0:
+        return np.zeros(0)
+    return 10.0 * np.log10(np.mean(x[:m * k].reshape(m, k) ** 2, axis=1) + 1e-12)
+
+
+def _backing_stack_ceiling(stems, tracks, grouped_ids, trims) -> None:
+    """Trim the backing vocals together when their sum crowds the lead."""
+    pairs = [(s, t) for s, t in zip(stems, tracks) if t["role"] in ("lead_vocal", "backing_vocal")]
+    backing = [(s, t) for s, t in pairs if t["role"] == "backing_vocal" and t["id"] not in grouped_ids]
+    leads = [(s, t) for s, t in pairs if t["role"] == "lead_vocal"]
+    hand_set = {tid for tid, v in (trims or {}).items() if abs(float(v)) > 1e-6}
+    if len(backing) < 2 or not leads or any(t["id"] in hand_set for _, t in backing):
+        return  # one voice is the hierarchy rule's business; a hand-set trim is the user's
+    if len({s.sr for s, _ in pairs}) != 1:
+        return
+    sr = pairs[0][0].sr
+    n = max(len(s.audio) for s, _ in backing + leads)
+
+    def total(group):
+        acc = np.zeros(n, dtype=np.float64)
+        for s, t in group:
+            a = np.asarray(s.audio, dtype=np.float64)
+            a = a.mean(axis=1) if a.ndim == 2 else a
+            acc[:len(a)] += a * dsp.db_to_lin(float(t["gain_db"]))
+        return _window_power_db(acc, sr)
+
+    lead_db, stack_db = total(leads), total(backing)
+    if lead_db.size == 0:
+        return
+    # a silent lead or a silent stack is not a balance to correct: -120 dB
+    # windows would read as "100 dB over" (or as an exact tie)
+    if lead_db.max() < BACKING_STACK_SILENCE_DB or stack_db.max() < BACKING_STACK_SILENCE_DB:
+        return
+    both = ((lead_db > max(lead_db.max() - BACKING_STACK_ACTIVE_DB, BACKING_STACK_SILENCE_DB))
+            & (stack_db > max(stack_db.max() - BACKING_STACK_ACTIVE_DB, BACKING_STACK_SILENCE_DB)))
+    if int(both.sum()) < 2:
+        return
+    over = float(np.median((stack_db - lead_db)[both])) + BACKING_STACK_GAP_DB
+    if over <= 0.05:
+        return
+    for _, t in backing:
+        before = float(t["gain_db"])
+        t["gain_db"] = round(max(-MAX_STAGE_DB, before - over), 2)
+        t.setdefault("evidence", []).append(
+            f"backing stack: the {len(backing)} backing vocals together were {over - BACKING_STACK_GAP_DB:+.1f} dB "
+            f"against the lead; trimmed {t['gain_db'] - before:+.2f} dB (the stack by {-over:+.2f} dB) "
+            f"to sit {BACKING_STACK_GAP_DB:.1f} dB under it")
 
 
 def _duplicate_warnings(tracks: list[dict], stems_by_id: dict, warnings: list,
@@ -1754,6 +1948,8 @@ def build_plan(
                     f"{t['id']}: backing vocal {status}"
                 )
 
+    _backing_stack_ceiling(stems, tracks, grouped_ids, trims)
+
     for t in tracks:
         if t["id"] in fit_expected:
             if t["id"] in grouped_ids:
@@ -1774,7 +1970,7 @@ def build_plan(
     # The helper only orders the automatic members it is about to place, so
     # the plan's own track order -- and the pairing with the stems -- is
     # untouched.
-    _spread_duplicate_pans(tracks)
+    _spread_duplicate_pans(tracks, frozenset(f["id"] for f in group_facts if not f["dual_mono"]))
 
     # A declared "balanced stems" source at full balance preservation is the
     # user saying: this material is already a balanced stereo print.  A role
@@ -1900,6 +2096,24 @@ def build_plan(
                     f"dynamic resonance suppression: ratio {t['resonance']['ratio']:.2f}, "
                     f"threshold {RESONANCE['threshold_db']:.1f} dB, at most {RESONANCE['max_db']:.0f} dB")
 
+    # R126: the drum hits put back on top, by the style's amount
+    ts_amount = float((preset.get("techniques") or {}).get("drum_transient", 0.0)) * float(intensity)
+    if ts_amount > 0.0:
+        for t in tracks:
+            unit = TRANSIENT_ROLE_DB.get(t["role"])
+            if unit is None or t["id"] in grouped_ids:
+                continue
+            attack = round(min(TRANSIENT_MAX_DB, unit[0] * ts_amount), 2)
+            sustain = round(max(-TRANSIENT_MAX_DB, unit[1] * ts_amount), 2)
+            if attack < TRANSIENT_MIN_DB:
+                continue
+            if abs(sustain) < TRANSIENT_MIN_DB:
+                sustain = 0.0
+            t["transient"] = {"law": TRANSIENT_LAW, "attack_db": attack, "sustain_db": sustain, **TRANSIENT}
+            t.setdefault("evidence", []).append(
+                f"transient shaping: attack {attack:+.1f} dB on each hit"
+                + (f", decay {sustain:+.1f} dB" if sustain else "") + " (level-independent)")
+
     # Fader gain alone cannot preserve balance: EQ, compression and saturation
     # change the level differently for each role.  Freeze the source window
     # and source level in the plan; the renderer executes this bounded matching rule
@@ -1982,6 +2196,10 @@ def build_plan(
                        "threshold_db": spec["threshold_db"]}
                 spec["ratio"] = min(float(spec["ratio"]), DRUM_BUS_MAX_RATIO)
                 spec["attack_ms"] = max(float(spec["attack_ms"]), DRUM_BUS_MIN_ATTACK_MS)
+            elif group == "vocal":
+                was = {"law": VOCAL_OPEN_LAW, "attack_ms": spec["attack_ms"],
+                       "threshold_db": spec["threshold_db"]}
+                spec["attack_ms"] = min(float(spec["attack_ms"]), VOCAL_BUS_MAX_ATTACK_MS)
             level = _bus_level_db(group)
             if level is not None:
                 # The estimate is only a hint.  The renderer places the threshold
@@ -1995,6 +2213,12 @@ def build_plan(
                     was["threshold_db"] = min(COMP_THRESHOLD_DB_RANGE[1],
                                               max(COMP_THRESHOLD_DB_RANGE[0], round(level + offset, 1)))
                     offset = DRUM_BUS_THRESHOLD_OFFSET_DB
+                elif group == "vocal":
+                    # R124: catch the loudest syllables, not every one
+                    was["threshold_offset_db"] = offset
+                    was["threshold_db"] = min(COMP_THRESHOLD_DB_RANGE[1],
+                                              max(COMP_THRESHOLD_DB_RANGE[0], round(level + offset, 1)))
+                    offset = VOCAL_BUS_THRESHOLD_OFFSET_DB
                 spec["threshold_offset_db"] = offset
                 # The estimate is bounded to the schema's legal range so a
                 # loud bus (two protected guitar mics at a legal +18 dB trim
@@ -2004,7 +2228,7 @@ def build_plan(
                 low, high = COMP_THRESHOLD_DB_RANGE
                 spec["threshold_db"] = min(high, max(low, round(level + offset, 1)))
             bus["comp"] = spec
-            if group == "drum":
+            if group in ("drum", "vocal"):
                 bus["comp_style_dial"] = was
         if group in ("music",):
             bus["saturation"] = round(min(float(sat.get("music", 0.0)) * 0.5, max_sat), 3)
@@ -2627,6 +2851,102 @@ def validate(plan: dict, schema_path: str | None = None) -> None:
         raise PlanError(f"plan structure is invalid: {exc!r}") from exc
 
 
+def _validate_backing_mid_automation(spec: dict, roles: dict, source: object,
+                                     *, render_frames: int | None = None) -> int:
+    name = "backing_mid_automation"
+    if not isinstance(source, dict):
+        raise PlanError(f"{name} requires a source object")
+    sample_rate = source.get("sample_rate")
+    if type(sample_rate) is not int or not 8000 <= sample_rate <= 384000:
+        raise PlanError(f"{name} requires source.sample_rate to be an integer in 8000..384000 Hz")
+    if (not isinstance(spec, dict) or set(spec) != {"law", "track_ids", "moves"}
+            or spec["law"] != "backing_mid_cosine_v1"):
+        raise PlanError(f"{name} requires the backing_mid_cosine_v1 law, track_ids and moves")
+    targets = spec["track_ids"]
+    if (not isinstance(targets, list) or not 1 <= len(targets) <= 16
+            or any(not isinstance(tid, str) or roles.get(tid) != "backing_vocal" for tid in targets)
+            or len(set(targets)) != len(targets)):
+        raise PlanError(f"{name}.track_ids requires 1 to 16 unique backing_vocal track IDs")
+    moves = spec["moves"]
+    if not isinstance(moves, list) or not 1 <= len(moves) <= 16:
+        raise PlanError(f"{name}.moves requires 1 to 16 moves")
+    if "frames" in source:
+        frames = source["frames"]
+        if type(frames) is not int or frames <= 0:
+            raise PlanError(f"{name} requires source.frames to be a positive integer when present")
+    else:
+        duration = source.get("duration_s")
+        message = f"{name} requires a positive finite source.duration_s that describes at least one frame"
+        if type(duration) not in (int, float) or duration <= 0:
+            raise PlanError(message)
+        try:
+            estimated_frames = float(duration) * sample_rate
+        except OverflowError as exc:
+            raise PlanError(message) from exc
+        if not math.isfinite(estimated_frames) or (frames := round(estimated_frames)) <= 0:
+            raise PlanError(message)
+    if render_frames is not None:
+        frames = min(frames, render_frames)
+    previous_end = 0
+    for i, move in enumerate(moves):
+        path = f"{name}.moves[{i}]"
+        if not isinstance(move, dict) or set(move) != {"start_frame", "end_frame", "fade_frames", "trim_db"}:
+            raise PlanError(f"{path} requires start_frame, end_frame, fade_frames and trim_db")
+        start, end, fade = (move[key] for key in ("start_frame", "end_frame", "fade_frames"))
+        if any(type(frame) is not int for frame in (start, end, fade)):
+            raise PlanError(f"{path} requires integer frames")
+        if not previous_end <= start < end <= frames or fade < 2 or 2 * fade >= end - start:
+            raise PlanError(f"{path} must be ordered, disjoint and inside the render, with both fades fitting")
+        trim = move["trim_db"]
+        if type(trim) not in (int, float) or not -3 <= trim < 0:
+            raise PlanError(f"{path}.trim_db must be in [-3, 0)")
+        previous_end = end
+    return sample_rate
+
+
+def _validate_vocal_dry_automation(spec: object, tracks: object, source: object,
+                                    *, render_frames: int | None = None) -> tuple[int, dict]:
+    name = "vocal_dry_automation"
+    if not isinstance(source, dict):
+        raise PlanError(f"{name} requires a source object")
+    sr, frames = source.get("sample_rate"), source.get("frames")
+    if type(sr) is not int or not 8000 <= sr <= 384000:
+        raise PlanError(f"{name} requires source.sample_rate to be an integer in 8000..384000 Hz")
+    if type(frames) is not int or frames <= 0 or (render_frames is not None and frames != render_frames):
+        raise PlanError(f"{name} requires source.frames to match the render length")
+    if (not isinstance(spec, dict) or set(spec) != {"law", "track_id", "moves"}
+            or spec["law"] != "vocal_dry_cosine_v1"):
+        raise PlanError(f"{name} requires the vocal_dry_cosine_v1 law, track_id and moves")
+    if not isinstance(tracks, list) or any(not isinstance(t, dict) for t in tracks):
+        raise PlanError(f"{name} requires a track list")
+    voices = [t for t in tracks if t.get("role") in ("lead_vocal", "backing_vocal")]
+    if (len(voices) != 1 or voices[0]["role"] != "lead_vocal" or not isinstance(spec["track_id"], str)
+            or not spec["track_id"] or voices[0].get("id") != spec["track_id"]
+            or sum(t.get("id") == spec["track_id"] for t in tracks) != 1
+            or not isinstance(voices[0].get("source_file"), str) or not voices[0]["source_file"]):
+        raise PlanError(f"{name}.track_id must identify the only vocal track, a lead_vocal")
+    if analyze.track_id(voices[0]["source_file"]) != spec["track_id"]:
+        raise PlanError(f"{name}.track_id must match the lead vocal's source filename ID")
+    moves = spec["moves"]
+    if not isinstance(moves, list) or not 1 <= len(moves) <= 16:
+        raise PlanError(f"{name}.moves requires 1 to 16 moves")
+    previous_end = 0
+    for i, move in enumerate(moves):
+        path = f"{name}.moves[{i}]"
+        if not isinstance(move, dict) or set(move) != {"start_frame", "end_frame", "fade_frames", "trim_db"}:
+            raise PlanError(f"{path} requires start_frame, end_frame, fade_frames and trim_db")
+        start, end, fade = (move[key] for key in ("start_frame", "end_frame", "fade_frames"))
+        if any(type(frame) is not int for frame in (start, end, fade)):
+            raise PlanError(f"{path} requires integer frames")
+        if not previous_end <= start < end <= frames or fade < 2 or 2 * fade >= end - start:
+            raise PlanError(f"{path} must be ordered, disjoint and inside the render, with both fades fitting")
+        trim = move["trim_db"]
+        if type(trim) not in (int, float) or not 0 < trim <= 2:
+            raise PlanError(f"{path}.trim_db must be in (0, 2]")
+        previous_end = end
+    return sr, voices[0]
+
+
 def _engine_invariants(plan: dict) -> None:
     """The invariants the engine itself relies on (the plan is schema-valid)."""
     try:
@@ -2659,7 +2979,32 @@ def _engine_invariants(plan: dict) -> None:
     # Each move must have something to act on; otherwise it is a setting that
     # silently does nothing (the renderer only runs buses that have tracks).
     roles = {t.get("id"): t.get("role") for t in plan["tracks"] if isinstance(t, dict)}
+    if "backing_mid_automation" in plan:
+        _validate_backing_mid_automation(plan["backing_mid_automation"], roles, plan["source"])
+    if "vocal_dry_automation" in plan:
+        _validate_vocal_dry_automation(plan["vocal_dry_automation"], plan["tracks"], plan["source"])
     groups = {ROLE_GROUP.get(r, "music") for r in roles.values()}
+    for bus, key in (("drum", "drum_automation"), ("music", "music_automation"),
+                     ("bass", "bass_low_automation")):
+        if key not in plan:
+            continue
+        if bus not in groups:
+            raise PlanError(f"{key} requires a {bus} track")
+        sr = int(plan["source"]["sample_rate"])
+        upper_band = bus == "drum" and plan[key]["law"] == "drum_high_cosine_v1"
+        if upper_band and sr <= 21000:
+            raise PlanError("drum_high_cosine_v1 requires a sample rate above 21000 Hz")
+        previous_end = 0
+        for index, move in enumerate(plan[key]["moves"]):
+            length = move["end_frame"] - move["start_frame"]
+            if length <= 2 * move["fade_frames"]:
+                raise PlanError(f"{key}.moves[{index}]: fades must fit inside the region")
+            if "peak_threshold_dbfs" in move and length < round(0.010 * sr):
+                raise PlanError(f"drum_automation.moves[{index}]: peak control requires at least 10 ms")
+            if bus == "bass" or upper_band:
+                if move["start_frame"] < previous_end:
+                    raise PlanError(f"{key}.moves[{index}]: moves must be ordered and disjoint")
+                previous_end = move["end_frame"]
     for name in ("drum", "bass"):
         if ((plan["buses"] or {}).get(name) or {}).get("balance") is not None and name not in groups:
             raise PlanError(f"buses.{name}.balance: the plan has no {name} track")
@@ -2747,6 +3092,12 @@ def _engine_invariants(plan: dict) -> None:
 
     if sum(t.get("dynamic_eq") is not None for t in plan["tracks"]) > 2:
         raise PlanError("dynamic vocal unmask supports at most2 targets")
+    if "music_mid_dip" in plan:
+        try:
+            unmask.validate_music_mid_dip(plan["music_mid_dip"], int(plan["source"]["sample_rate"]),
+                                          float(plan["source"]["duration_s"]))
+        except ValueError as exc:
+            raise PlanError(f"invalid music_mid_dip: {exc}") from exc
     known_ids = {t["id"] for t in plan["tracks"] if t["role"] == "lead_vocal"}
     for track in plan["tracks"]:
         if track.get("dynamic_eq") is not None:

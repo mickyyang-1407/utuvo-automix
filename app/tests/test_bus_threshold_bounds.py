@@ -232,7 +232,10 @@ def test_the_offset_is_exact():
             continue
         assert after["threshold_offset_db"] == before["threshold_offset_db"], group
         amount = float(preset["compression"].get(group, 0.0)) * 0.75
-        assert after["threshold_offset_db"] == round(-1.0 - 6.0 * amount, 1), group
+        # R117 / R124: the drum and vocal buses sit at a fixed offset above the average
+        fixed = {"drum": planner.DRUM_BUS_THRESHOLD_OFFSET_DB, "vocal": planner.VOCAL_BUS_THRESHOLD_OFFSET_DB}
+        expected = fixed.get(group, round(-1.0 - 6.0 * amount, 1))
+        assert after["threshold_offset_db"] == expected, group
 
 
 def test_an_in_range_estimate_is_left_exact():

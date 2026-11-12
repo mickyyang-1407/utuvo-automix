@@ -245,6 +245,8 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         help="build and write the plan (and receipt) without rendering audio",
     )
     ap.add_argument("--render-plan", default=None, help="re-render an existing mixplan.json")
+    ap.add_argument("--adaptive-release", action="store_true",
+                    help="trial adaptive release on a new mix after the existing headroom pass")
     ap.add_argument(
         "--capture-groups",
         default=None,
@@ -258,6 +260,8 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     ap.add_argument("--list-styles", action="store_true", help="show available styles")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
+    if args.adaptive_release and (args.render_plan or args.plan_only or args.reference):
+        ap.error("--adaptive-release requires a new mix without reference matching")
     if args.plan_only and args.export_stems:
         ap.error("--plan-only does not render, so it cannot --export-stems")
     if args.capture_groups and args.render_plan:
@@ -459,6 +463,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                 true_peak_db=args.true_peak,
                 collect=collected,
                 capture_groups=capture_groups,
+                adaptive_release=args.adaptive_release,
             )
         render.write_wav24(mix_path, mix, int(p["source"]["sample_rate"]))
         if args.render_plan:

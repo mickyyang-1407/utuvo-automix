@@ -141,6 +141,127 @@
       "description": "A measured headroom correction after automatic balance, with effects following. Empty means only the limiter guard was tightened; absent means no correction.",
       "enum": [{}, {"drum": -1}, {"drum": -3, "music": -3}]
     },
+    "drum_automation": {
+      "description": "Saved post-fader drum moves. drum_cosine_v1 moves the dry bus and followed effects. drum_high_cosine_v1 applies disjoint cuts to the dry 6–10.5 kHz band.",
+      "type": "object",
+      "required": ["law", "moves"],
+      "additionalProperties": false,
+      "properties": {
+        "law": {"enum": ["drum_cosine_v1", "drum_high_cosine_v1"]},
+        "moves": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {"$ref": "#/$defs/fader_move"}
+        }
+      },
+      "if": {"properties": {"law": {"const": "drum_high_cosine_v1"}}},
+      "then": {"properties": {"moves": {"items": {
+        "not": {"required": ["peak_threshold_dbfs"]},
+        "properties": {"trim_db": {"minimum": -2, "exclusiveMaximum": 0}}
+      }}}},
+      "else": {"properties": {"moves": {"maxItems": 16}}}
+    },
+    "music_automation": {
+      "description": "Ordered post-fader music moves on the source sample timeline. Moves also apply to any existing followed return.",
+      "type": "object",
+      "required": ["law", "moves"],
+      "additionalProperties": false,
+      "properties": {
+        "law": {"const": "music_cosine_v1"},
+        "moves": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {"$ref": "#/$defs/fader_move", "not": {"required": ["peak_threshold_dbfs"]}}
+        }
+      }
+    },
+    "music_mid_dip": {
+      "description": "Saved post-fader Mid-only bell on the dry music bus.",
+      "type": "object",
+      "required": ["law", "curve"],
+      "additionalProperties": false,
+      "properties": {
+        "law": {"const": "music_mid_dip_v1"},
+        "curve": {"$ref": "#/$defs/dynamic_eq/properties/curve"}
+      }
+    },
+    "bass_low_automation": {
+      "description": "Saved post-fader cuts on the dry bass below the 120 Hz crossover.",
+      "type": "object",
+      "required": ["law", "moves"],
+      "additionalProperties": false,
+      "properties": {
+        "law": {"const": "bass_low_cosine_v1"},
+        "moves": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/fader_move",
+            "not": {"required": ["peak_threshold_dbfs"]},
+            "properties": {"trim_db": {"minimum": -1.5, "exclusiveMaximum": 0}}
+          }
+        }
+      }
+    },
+    "vocal_dry_automation": {
+      "description": "Saved boosts on a single dry lead-vocal bus, after bus balance and before effect returns join.",
+      "type": "object",
+      "required": ["law", "track_id", "moves"],
+      "additionalProperties": false,
+      "properties": {
+        "law": {"const": "vocal_dry_cosine_v1"},
+        "track_id": {
+          "description": "The only vocal track ID, derived from its exact source filename by the planner.",
+          "type": "string",
+          "minLength": 1
+        },
+        "moves": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "required": ["start_frame", "end_frame", "fade_frames", "trim_db"],
+            "additionalProperties": false,
+            "properties": {
+              "start_frame": {"type": "integer", "minimum": 0},
+              "end_frame": {"type": "integer", "minimum": 1},
+              "fade_frames": {"type": "integer", "minimum": 2},
+              "trim_db": {"type": "number", "exclusiveMinimum": 0, "maximum": 2}
+            }
+          }
+        }
+      }
+    },
+    "backing_mid_automation": {
+      "description": "Saved cuts on backing-vocal Mid at 1.4–3.4 kHz, after track balance and before sends.",
+      "type": "object",
+      "required": ["law", "track_ids", "moves"],
+      "additionalProperties": false,
+      "properties": {
+        "law": {"const": "backing_mid_cosine_v1"},
+        "track_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "moves": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/fader_move",
+            "not": {"required": ["peak_threshold_dbfs"]},
+            "properties": {"trim_db": {"minimum": -3, "exclusiveMaximum": 0}}
+          }
+        }
+      }
+    },
     "buses": {
       "type": "object",
       "properties": {
@@ -393,6 +514,18 @@
   },
   "additionalProperties": true,
   "$defs": {
+    "fader_move": {
+      "type": "object",
+      "required": ["start_frame", "end_frame", "fade_frames", "trim_db"],
+      "additionalProperties": false,
+      "properties": {
+        "start_frame": {"type": "integer", "minimum": 0},
+        "end_frame": {"type": "integer", "minimum": 1},
+        "fade_frames": {"type": "integer", "minimum": 2},
+        "trim_db": {"type": "number", "minimum": -6, "maximum": 0},
+        "peak_threshold_dbfs": {"type": "number", "minimum": -120, "maximum": 24}
+      }
+    },
     "role": {
       "type": "string",
       "enum": [
@@ -811,6 +944,51 @@
         "dynamic_eq": {
           "$ref": "#/$defs/dynamic_eq"
         },
+        "transient": {
+          "description": "R126: level-independent transient shaping (dsp.transient_shape): a peak hold of the track's level against its own trailing mean over attack_ms finds each hit and adds attack_db there; the same level held long (20 dB per sustain_ms) against a quick hold finds the decay and adds sustain_db there. No threshold: a soft hit and a loud hit get the same dB. Frames range_db under the track's loudest are left alone. After the saturation. When absent the track is not touched.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "law",
+            "attack_db",
+            "sustain_db",
+            "attack_ms",
+            "sustain_ms",
+            "range_db"
+          ],
+          "properties": {
+            "law": {
+              "enum": [
+                "transient_diff_env_v1"
+              ]
+            },
+            "attack_db": {
+              "type": "number",
+              "minimum": -6,
+              "maximum": 6
+            },
+            "sustain_db": {
+              "type": "number",
+              "minimum": -6,
+              "maximum": 6
+            },
+            "attack_ms": {
+              "type": "number",
+              "minimum": 5,
+              "maximum": 50
+            },
+            "sustain_ms": {
+              "type": "number",
+              "minimum": 200,
+              "maximum": 2000
+            },
+            "range_db": {
+              "type": "number",
+              "minimum": 10,
+              "maximum": 80
+            }
+          }
+        },
         "resonance": {
           "description": "R122: dynamic resonance suppression (dsp.resonance_suppress): per STFT frame, the power in a detect_oct window around each bin against the power of a ref_oct window without the notch_oct around it; the excess over threshold_db times ratio times the listening weight (0 below 800 Hz, 1 from 2 to 8 kHz) is cut, at most max_db, attack_ms / release_ms; frames 40 dB under the track's loudest are left alone. Before the compressor. When absent the track is not touched.",
           "type": "object",
@@ -929,7 +1107,7 @@
           "maximum": 12
         },
         "comp_style_dial": {
-          "description": "R117 receipt (drum_open_v1): what the style's compression dial alone would have written into comp (ratio, attack_ms; for the drum bus also threshold_db and threshold_offset_db) before new plans opened up the drums. The renderer does not read it.",
+          "description": "R117 receipt (drum_open_v1): what the style's compression dial alone would have written into comp (ratio, attack_ms; for the drum bus also threshold_db and threshold_offset_db) before new plans opened up the drums. R124 adds vocal_bus_open_v1 on the vocal bus (attack_ms, threshold_db, threshold_offset_db as written before the vocal bus only caught the loudest syllables). The renderer does not read it.",
           "type": "object"
         },
         "comp": {
@@ -1187,10 +1365,34 @@
               "maximum": 6
             },
             "law": {
-              "description": "How the true-peak limiter moves its gain. tp_fast_v1 (the default, what plans without this field were rendered with) lets go of a peak within about 2 ms; tp_release_v1 ramps in ahead of a peak at 1 dB/ms and releases at 30 dB/s, like a mastering limiter, without the audio-rate gain flutter that sounds clipped.",
-              "enum": ["tp_fast_v1", "tp_release_v1"]
+              "description": "How the true-peak limiter moves its gain. tp_fast_v1 (the default, what plans without this field were rendered with) lets go of a peak within about 2 ms; tp_release_v1 ramps in ahead of a peak at 1 dB/ms and releases at 30 dB/s, like a mastering limiter, without the audio-rate gain flutter that sounds clipped. tp_adaptive_release_v1 varies release from 30 to 60 dB/s and requires an explicit drive.",
+              "enum": ["tp_fast_v1", "tp_release_v1", "tp_adaptive_release_v1", "tp_fixed_drive_release_v1"]
+            },
+            "drive_db": {
+              "description": "Frozen pre-limiter gain for the adaptive law, in dB.",
+              "type": "number",
+              "minimum": -60,
+              "maximum": 60
+            },
+            "drive_linear": {
+              "description": "Exact linear input gain for the fixed-drive release law.",
+              "type": "number",
+              "minimum": 0.001,
+              "maximum": 1000
             }
           },
+          "allOf": [
+            {
+              "if": {"properties": {"law": {"const": "tp_adaptive_release_v1"}}, "required": ["law"]},
+              "then": {"required": ["drive_db"]},
+              "else": {"not": {"required": ["drive_db"]}}
+            },
+            {
+              "if": {"properties": {"law": {"const": "tp_fixed_drive_release_v1"}}, "required": ["law"]},
+              "then": {"required": ["drive_linear"]},
+              "else": {"not": {"required": ["drive_linear"]}}
+            }
+          ],
           "additionalProperties": true
         },
         "target_lufs": {

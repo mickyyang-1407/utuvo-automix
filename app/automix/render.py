@@ -18,6 +18,7 @@ target -> true-peak check.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import wave
@@ -26,7 +27,7 @@ import numpy as np
 
 from . import align as alignmod, analyze, dsp, unmask
 from .plan import (BALANCE_METER_LAW, BALANCE_SEND_LAW, REVERB_DUCK_LAW, ROLE_GROUP, SEND_MIN, PlanError,
-                   _manual_reverb_amount)
+                   _manual_reverb_amount, _validate_backing_mid_automation, _validate_vocal_dry_automation)
 
 #: plan vocabulary -> dsp vocabulary
 KIND_MAP = {
@@ -46,6 +47,7 @@ USER_TRIM_LABEL = {"vocal": "vocal", "drum": "drums", "bass": "bass", "music": "
 
 #: leave this much sample-peak headroom before the master chain
 PREMASTER_HEADROOM_DB = -6.0
+FIXED_DRIVE_RELEASE_LAW = "tp_fixed_drive_release_v1"
 
 
 class RenderError(RuntimeError):
@@ -641,6 +643,54 @@ def _user_trims(bus_specs: dict) -> dict:
     return out
 
 
+def _apply_fader_moves(bus, wet, sr, moves, *, filtered_band=None):
+    for move in moves:
+        start, end = int(move["start_frame"]), int(move["end_frame"])
+        fade = int(move["fade_frames"])
+        if not 0 <= start < end <= len(bus) or not 2 <= fade < (end - start) / 2:
+            raise RenderError("automation move or fade lies outside the render")
+        dry = bus[start:end]
+        window = np.ones(end - start)
+        ramp = (1 - np.cos(np.linspace(0, np.pi, fade))) * 0.5
+        window[:fade] = ramp
+        window[-fade:] = ramp[::-1]
+        if "peak_threshold_dbfs" in move:
+            block = round(0.010 * sr)
+            if len(dry) < block:
+                raise RenderError("drum_automation peak control requires at least 10 ms")
+            peaks = np.max(np.abs(dry[:len(dry) // block * block].reshape(-1, block, 2)), axis=(1, 2))
+            peak_db = 20 * np.log10(np.maximum(peaks, 1e-12))
+            need = np.clip(0.75 * (peak_db - move["peak_threshold_dbfs"]), 0, 2)
+            centers = block * (np.arange(len(need)) + 0.5)
+            t = centers / sr
+            held = np.maximum.accumulate(need + 80 * t) - 80 * t
+            reverse_time = -t[::-1]
+            shape = (np.maximum.accumulate(held[::-1] + 400 * reverse_time) - 400 * reverse_time)[::-1]
+            attenuation = np.interp(np.arange(len(dry)), centers, shape)
+            dry *= (10 ** (-attenuation * window / 20))[:, None]
+        factor = (10 ** (move["trim_db"] * window / 20))[:, None]
+        if filtered_band is None:
+            dry *= factor
+        else:
+            dry += (factor - 1) * filtered_band[start:end]
+        if wet is not None:
+            wet[start:end] *= factor
+
+
+def _apply_backing_mid_moves(x: np.ndarray, sr: int, moves: list[dict]) -> np.ndarray:
+    mid_band = dsp.zero_phase_butterworth_band(x.mean(axis=1, keepdims=True), sr, 1400.0, 3400.0)
+    edited = x.copy()
+    for move in moves:
+        start, end, fade = (move[key] for key in ("start_frame", "end_frame", "fade_frames"))
+        weight = np.ones(end - start)
+        ramp = .5 - .5 * np.cos(np.linspace(0, np.pi, fade))
+        weight[:fade] = ramp
+        weight[-fade:] = ramp[::-1]
+        delta = mid_band[start:end] * weight[:, None] * (dsp.db_to_lin(move["trim_db"]) - 1)
+        edited[start:end] += delta
+    return edited
+
+
 def _join_followed(buses: dict, followed: dict, fader_db: dict, n: int) -> dict:
     """Add the followed returns to the fx bus at their bus's balance move
     (R117, post_fader_v1) and return the receipt.  A bus the balance did not
@@ -709,6 +759,22 @@ def _double(x: np.ndarray, sr: int, spec: dict, tid: str) -> np.ndarray:
     return dsp.vocal_double(x, sr, spec)
 
 
+#: R126: the bounds a track's ``transient`` block must keep
+TRANSIENT_BOUNDS = {"attack_db": (-6.0, 6.0), "sustain_db": (-6.0, 6.0), "attack_ms": (5.0, 50.0),
+                    "sustain_ms": (200.0, 2000.0), "range_db": (10.0, 80.0)}
+
+
+def _transient(x: np.ndarray, sr: int, spec: dict, tid: str) -> tuple[np.ndarray, dict]:
+    """R126: a track's ``transient`` block, checked, then dsp.transient_shape."""
+    if spec.get("law") not in dsp.TRANSIENT_LAWS:
+        raise RenderError(f"{tid}: unknown transient law {spec.get('law')!r}")
+    for key, (lo, hi) in TRANSIENT_BOUNDS.items():
+        v = spec.get(key)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not lo <= v <= hi:
+            raise RenderError(f"{tid}: transient {key} must be {lo:g}..{hi:g}, got {v!r}")
+    return dsp.transient_shape(x, sr, spec)
+
+
 #: R122: the bounds a track's ``resonance`` block must keep
 RESONANCE_BOUNDS = {"detect_oct": (1 / 24, 1.0), "notch_oct": (1 / 24, 1.0), "ref_oct": (0.5, 3.0),
                     "threshold_db": (0.5, 20.0), "ratio": (0.0, 2.0), "max_db": (0.0, 12.0),
@@ -735,6 +801,8 @@ def render(
     plan: dict,
     reverb_ir_kwargs: dict | None = None,
     collect: dict | None = None,
+    *,
+    premaster_capture: dict | None = None,
 ) -> tuple[np.ndarray, dict]:
     """Return (stereo mix, report dict).  Writing files is the caller's job.
 
@@ -748,11 +816,43 @@ def render(
         manual_amount = _manual_reverb_amount(rev_plan.get("manual_amount", 1.0))
     except PlanError as exc:
         raise RenderError(str(exc)) from exc
-    sr = int(plan["source"]["sample_rate"])
+    has_backing_mid = "backing_mid_automation" in plan
+    has_vocal_dry = "vocal_dry_automation" in plan
+    if has_vocal_dry and not stems:
+        raise RenderError("vocal_dry_automation requires rendered stems")
+    if not has_backing_mid and not has_vocal_dry:
+        sr = int(plan["source"]["sample_rate"])
     n = max(s.audio.shape[0] for s in stems)
     by_file = {s.name: s for s in stems}
 
+    if has_vocal_dry:
+        vocal_dry = plan["vocal_dry_automation"]
+        try:
+            sr, target = _validate_vocal_dry_automation(
+                vocal_dry, plan.get("tracks"), plan.get("source"), render_frames=n
+            )
+        except PlanError as exc:
+            raise RenderError(str(exc)) from exc
+        vocal_sources = [s for s in stems if analyze.track_id(s.name) == target["id"]]
+        if (len(vocal_sources) != 1 or vocal_sources[0].name != target["source_file"]
+                or len(vocal_sources[0].audio) < vocal_dry["moves"][-1]["end_frame"]):
+            raise RenderError("vocal_dry_automation requires one matching lead source covering every move")
+        if any(s.sr != sr for s in stems):
+            raise RenderError("vocal_dry_automation requires sources at the saved sample rate")
+
     track_index = {t["id"]: t for t in plan["tracks"]}
+    backing_mid_ids = set()
+    if has_backing_mid:
+        backing_mid = plan["backing_mid_automation"]
+        try:
+            sr = _validate_backing_mid_automation(
+                backing_mid, {tid: t["role"] for tid, t in track_index.items()}, plan.get("source"), render_frames=n
+            )
+        except PlanError as exc:
+            raise RenderError(str(exc)) from exc
+        backing_mid_ids = set(backing_mid["track_ids"])
+        if not backing_mid_ids <= {analyze.track_id(st.name) for st in stems}:
+            raise RenderError("backing_mid_automation requires all targeted tracks to be rendered")
     if sum(t.get('dynamic_eq') is not None for t in plan['tracks']) > 2:
         raise RenderError('dynamic vocal unmask supports at most2 targets')
     priority_ids = {t['id'] for t in plan['tracks'] if t['role'] == 'lead_vocal'}
@@ -812,6 +912,27 @@ def render(
     if headroom not in ({}, {"drum": -1}, {"drum": -3, "music": -3}):
         raise RenderError("headroom_trim_db must be empty, drum -1 dB, or drum and music -3 dB")
     follow.update(headroom)
+    drum_automation = plan.get("drum_automation")
+    drum_high_move = False
+    if drum_automation is not None:
+        if drum_automation["law"] == "drum_cosine_v1":
+            follow.add("drum")
+        elif drum_automation["law"] == "drum_high_cosine_v1":
+            if sr <= 21000 or any("peak_threshold_dbfs" in move for move in drum_automation["moves"]):
+                raise RenderError("drum_high_cosine_v1 requires a rate above 21000 Hz and fader moves")
+            drum_high_move = True
+        else:
+            raise RenderError("unknown drum_automation law")
+    music_automation = plan.get("music_automation")
+    if music_automation is not None and (music_automation["law"] != "music_cosine_v1"
+                                        or any("peak_threshold_dbfs" in move for move in music_automation["moves"])):
+        raise RenderError("music_automation requires music_cosine_v1 fader moves")
+    bass_low_automation = plan.get("bass_low_automation")
+    if bass_low_automation is not None and (
+        bass_low_automation["law"] != "bass_low_cosine_v1"
+        or any("peak_threshold_dbfs" in move for move in bass_low_automation["moves"])
+    ):
+        raise RenderError("bass_low_automation requires bass_low_cosine_v1 fader moves")
     # R119: a ducked vocal reverb needs the vocal's own return
     reverb_duck = _reverb_duck_spec(plan)
     if reverb_duck:
@@ -820,6 +941,7 @@ def render(
     delay_in_of: dict[str, np.ndarray] = {}
     doubled: list[dict] = []
     resonance: list[dict] = []
+    transients: list[dict] = []
 
     for st in stems:
         # the track id must come from the one place that defines it: the
@@ -956,6 +1078,17 @@ def render(
             x = dsp.saturate(x, sat, law=sat_law, sr=sr)
             _mark("saturation", before)
 
+        # R126: the hits put back on top of what the compressor and the
+        # saturation rounded off (dsp.transient_shape); level-independent
+        ts = t.get("transient")
+        if ts:
+            before = x
+            x, ts_receipt = _transient(x, sr, ts, tid)
+            x = x.astype(before.dtype, copy=False)
+            _mark("transient shaping", before)
+            transients.append({"track": tid, "attack_db": float(ts["attack_db"]),
+                               "sustain_db": float(ts["sustain_db"]), **ts_receipt})
+
         w = float(t.get("width", 1.0))
         before = x.copy()
         x = _set_width(x, w)
@@ -991,6 +1124,11 @@ def render(
                 )
             if matched["skipped"]:
                 render_warnings.append(f"{tid}: loudness match skipped: {matched['skipped']}")
+
+        if tid in backing_mid_ids:
+            before = x
+            x = _apply_backing_mid_moves(x, sr, backing_mid["moves"])
+            _mark("backing vocal Mid automation", before)
 
         group = BUS_OF_ROLE.get(t["role"], "music")
         send = float((t.get("sends") or {}).get("plate", 0.0))
@@ -1231,6 +1369,47 @@ def render(
             buses[name] = buses[name] * dsp.db_to_lin(value)
             fader_db[name] = fader_db.get(name, 0.0) + value
 
+    for name, automation in (("drum", drum_automation), ("music", music_automation)):
+        if automation is not None:
+            if name not in buses:
+                raise RenderError(f"{name}_automation requires a rendered {name} bus")
+            if name == "drum" and drum_high_move:
+                upper = dsp.drum_upper_band(buses[name], sr)
+                _apply_fader_moves(buses[name], None, sr, automation["moves"], filtered_band=upper)
+                del upper
+            else:
+                _apply_fader_moves(buses[name], followed_wet.get(name), sr, automation["moves"])
+
+    if bass_low_automation is not None:
+        if "bass" not in buses:
+            raise RenderError("bass_low_automation requires a rendered bass bus")
+        bass = buses["bass"]
+        low = dsp.crossover_lowpass(bass, sr, 120.0)
+        _apply_fader_moves(bass, None, sr, bass_low_automation["moves"], filtered_band=low)
+        del bass, low
+
+    if has_vocal_dry:
+        if "vocal" not in buses:
+            raise RenderError("vocal_dry_automation requires a rendered vocal bus")
+        # Sends have already been rendered into separate returns above.
+        _apply_fader_moves(buses["vocal"], None, sr, vocal_dry["moves"])
+
+    music_mid_dip = plan.get("music_mid_dip")
+    if "music_mid_dip" in plan:
+        try:
+            unmask.validate_music_mid_dip(music_mid_dip, sr, n / sr)
+        except ValueError as exc:
+            raise RenderError(f"invalid music_mid_dip: {exc}") from exc
+        if "music" not in buses:
+            raise RenderError("music_mid_dip requires a rendered music bus")
+        music = buses["music"]
+        mid = music.mean(axis=1)
+        curve = np.asarray(music_mid_dip["curve"])
+        envelope = np.interp(np.arange(n) / sr, curve[:, 0], curve[:, 1])
+        filtered = dsp.apply_eq(mid[:, None], sr, [unmask.MUSIC_MID_DIP_BAND])[:, 0]
+        buses["music"] = music + ((filtered - mid) * envelope)[:, None]
+        del music, mid, curve, envelope, filtered
+
     # R117: the followed returns join the fx bus at their bus's fader
     send_follow = None
     if followed_wet:
@@ -1322,18 +1501,43 @@ def render(
 
     # plans written before the release law exist replay with the fast one
     limiter_law = str((m.get("limiter") or {}).get("law", "tp_fast_v1"))
-    if limiter_law not in dsp.LIMITER_LAWS:
+    if limiter_law not in (*dsp.LIMITER_LAWS, FIXED_DRIVE_RELEASE_LAW):
         raise RenderError(f"unknown limiter law {limiter_law!r}")
     pre_limit = mix
-    mix, loud, master_gain_db = _hit_target(mix, sr, target, ceiling, law=limiter_law)
-    limiting = _limiter_receipt(pre_limit, dsp.db_to_lin(master_gain_db), mix, sr, limiter_law)
+    if premaster_capture is not None:
+        premaster_capture["audio"] = pre_limit
+        premaster_capture["warning_count"] = len(render_warnings)
+    fixed_drive = limiter_law == FIXED_DRIVE_RELEASE_LAW
+    if limiter_law == dsp.ADAPTIVE_LIMITER_LAW:
+        drive = m["limiter"].get("drive_db")
+        if type(drive) not in (int, float) or not -60 <= drive <= 60:
+            raise RenderError("adaptive limiter requires drive_db between -60 and 60")
+        mix, master_gain_db = _apply_adaptive_limiter(pre_limit, sr, ceiling, float(drive))
+        loud = 1
+    elif fixed_drive:
+        gain = m["limiter"].get("drive_linear")
+        if type(gain) not in (int, float) or not 0.001 <= gain <= 1000:
+            raise RenderError("fixed-drive limiter requires drive_linear between 0.001 and 1000")
+        mix = dsp.true_peak_limit(pre_limit * gain, sr, ceiling, law="tp_release_v1")
+        tp = dsp.true_peak_db(mix, sr)
+        if tp > ceiling:
+            correction = dsp.db_to_lin(ceiling - tp)
+            mix *= correction
+            gain *= correction
+        master_gain_db = dsp.lin_to_db(gain)
+        loud = 1
+    else:
+        mix, loud, master_gain_db = _hit_target(mix, sr, target, ceiling, law=limiter_law)
+    limiting = _limiter_receipt(pre_limit, gain if fixed_drive else dsp.db_to_lin(master_gain_db), mix, sr, limiter_law)
     # R115: the squash guard.  A dense song can hit the loudness target only
     # by limiting its loudest moments hard; when the loudest 5% loses more
     # than max_gr_p95_db, give back some loudness (at most max_backoff_db)
     # instead.  Only plans that carry the field: older ones render as before.
     guard = (m.get("limiter") or {}).get("max_gr_p95_db")
     backed_off = 0.0
-    if guard is not None and limiting.get("gain_reduction_p95_db") is not None:
+    # The adaptive plan already records the auditioned drive.
+    if (limiter_law != dsp.ADAPTIVE_LIMITER_LAW and not fixed_drive
+            and guard is not None and limiting.get("gain_reduction_p95_db") is not None):
         limit_back = float((m.get("limiter") or {}).get("max_backoff_db", 1.5))
         for _ in range(4):
             over = -float(guard) - float(limiting["gain_reduction_p95_db"])
@@ -1355,32 +1559,15 @@ def render(
                 f"loudest moments (loudest 5% now {limiting['gain_reduction_p95_db']:+.1f} dB)")
     del pre_limit
 
-    final_lufs = dsp.loudness_lufs(mix, sr)
-    if final_lufs > -70.0 and target - final_lufs > 0.5 + backed_off:
-        render_warnings.append(
-            f"loudness: {final_lufs:.1f} LUFS, {target - final_lufs:.1f} dB under the {target:.1f} target -- "
-            "the limiter stopped before it would squash the mix")
     report = {
         "tracks": per_track,
         "skipped_stems": skipped,
         "warnings": render_warnings,
         "buses": bus_report,
-        "lufs": round(final_lufs, 2),
-        # the native rate the measurements above were taken at, so a
-        # downstream diagnostic measures the same audio at the same rate
-        "sample_rate": int(sr),
-        "target_lufs": target,
-        "true_peak_db": round(dsp.true_peak_db(mix, sr), 2),
-        "ceiling_db": ceiling,
-        "peak_db": round(dsp.lin_to_db(float(np.max(np.abs(mix)))), 2),
-        "crest_db": round(dsp.crest_db(mix), 2),
-        "correlation": round(dsp.stereo_correlation(mix), 3),
-        "width": round(dsp.width_ratio(mix), 3),
+        **_master_report(mix, sr, target, ceiling, master_gain_db, loud, render_warnings, backed_off),
         "wet_ratio_db": wet_ratio_db,
         "wet_ratio_measurement": "pre-bus pure convolution return over all dry tracks",
-        "loudness_passes": loud,
         "staging_db": round(staging_db, 2),
-        "master_gain_db": round(master_gain_db, 2),
     }
     if vocal_balance is not None:
         report["vocal_balance"] = vocal_balance
@@ -1394,6 +1581,16 @@ def render(
         report["user_trims"] = dict(user_trims)
     if "headroom_trim_db" in plan:
         report["headroom_trim_db"] = headroom
+    if drum_automation is not None:
+        report["drum_automation"] = drum_automation
+    if music_automation is not None:
+        report["music_automation"] = music_automation
+    if bass_low_automation is not None:
+        report["bass_low_automation"] = bass_low_automation
+    if has_vocal_dry:
+        report["vocal_dry_automation"] = vocal_dry
+    if music_mid_dip is not None:
+        report["music_mid_dip"] = {"law": music_mid_dip["law"], "curve_points": len(music_mid_dip["curve"])}
     report["limiter"] = limiting
     if "saturation_law" in plan:
         report["saturation_law"] = sat_law
@@ -1405,6 +1602,8 @@ def render(
         report["vocal_double"] = doubled
     if resonance:
         report["resonance"] = resonance
+    if transients:
+        report["transient"] = transients
     aligned = [{"track": t["id"], "advance_ms": float(t["align"].get("advance_ms", 0.0)),
                 "polarity": int(t["align"].get("polarity", 1))}
                for t in plan.get("tracks", []) if t.get("align")]
@@ -1441,6 +1640,21 @@ def render(
     return mix, report
 
 
+def _master_report(mix, sr, target, ceiling, master_gain_db, loudness_passes, warnings, backed_off=0.0):
+    """Report metrics and warnings belonging to the final stereo waveform."""
+    lufs = dsp.loudness_lufs(mix, sr)
+    if lufs > -70.0 and target - lufs > 0.5 + backed_off:
+        warnings.append(
+            f"loudness: {lufs:.1f} LUFS, {target - lufs:.1f} dB under the {target:.1f} target -- "
+            "the limiter stopped before it would squash the mix")
+    return {"lufs": round(lufs, 2), "sample_rate": int(sr), "target_lufs": target,
+            "true_peak_db": round(dsp.true_peak_db(mix, sr), 2), "ceiling_db": ceiling,
+            "peak_db": round(dsp.lin_to_db(float(np.max(np.abs(mix)))), 2),
+            "crest_db": round(dsp.crest_db(mix), 2), "correlation": round(dsp.stereo_correlation(mix), 3),
+            "width": round(dsp.width_ratio(mix), 3), "loudness_passes": loudness_passes,
+            "master_gain_db": round(master_gain_db, 2)}
+
+
 def _window_power(x: np.ndarray, w: int, n: int) -> np.ndarray:
     """Mean square per window of ``w`` samples, computed ten seconds at a
     time so a long session never needs a float64 copy of the whole mix."""
@@ -1452,7 +1666,17 @@ def _window_power(x: np.ndarray, w: int, n: int) -> np.ndarray:
     return np.concatenate(out) if out else np.zeros(0)
 
 
-def _limiter_receipt(before: np.ndarray, gain: float, after: np.ndarray, sr: int, law: str) -> dict:
+def _apply_adaptive_limiter(x, sr, ceiling, drive):
+    y = dsp.true_peak_limit(x * dsp.db_to_lin(drive), sr, ceiling, law=dsp.ADAPTIVE_LIMITER_LAW)
+    tp = dsp.true_peak_db(y, sr)
+    if tp > ceiling:
+        y = y * dsp.db_to_lin(ceiling - tp)
+        drive += ceiling - tp
+    return y, drive
+
+
+def _limiter_receipt(before: np.ndarray, gain: float, after: np.ndarray, sr: int, law: str,
+                     *, unrounded: bool = False) -> dict:
     """How hard the limiter worked: gain reduction over 50 ms windows."""
     w = max(1, int(0.05 * sr))
     n = (min(before.shape[0], after.shape[0]) // w) * w
@@ -1464,8 +1688,9 @@ def _limiter_receipt(before: np.ndarray, gain: float, after: np.ndarray, sr: int
     if not live.any():
         return {"law": law}
     gr = 10.0 * np.log10(np.maximum(pa[live], 1e-20) / pb[live])
+    p95 = float(np.percentile(gr, 5))
     return {"law": law, "gain_reduction_median_db": round(float(np.median(gr)), 2),
-            "gain_reduction_p95_db": round(float(np.percentile(gr, 5)), 2),
+            "gain_reduction_p95_db": p95 if unrounded else round(p95, 2),
             "time_over_1db": round(float(np.mean(gr < -1.0)), 3)}
 
 
@@ -1745,6 +1970,17 @@ def write_report(path: str, plan: dict, report: dict, stems: list) -> None:
         *(["| automatic limiter headroom | "
            + (", ".join(f"{name} {v:+.1f} dB" for name, v in report["headroom_trim_db"].items())
               or "tighter limiter guard") + " |"] if "headroom_trim_db" in report else []),
+        *([f"| drum automation | {len(report['drum_automation']['moves'])} saved moves |"]
+          if "drum_automation" in report else []),
+        *([f"| music automation | {len(report['music_automation']['moves'])} saved moves |"]
+          if "music_automation" in report else []),
+        *([f"| bass low-band automation | {len(report['bass_low_automation']['moves'])} saved moves |"]
+          if "bass_low_automation" in report else []),
+        *([f"| dry vocal automation | {report['vocal_dry_automation']['law']}, "
+           f"{len(report['vocal_dry_automation']['moves'])} saved moves |"]
+          if "vocal_dry_automation" in report else []),
+        *([f"| music Mid dip | {report['music_mid_dip']['law']}, {report['music_mid_dip']['curve_points']} saved points |"]
+          if "music_mid_dip" in report else []),
         *(
             [f"| saturation | {report['saturation_law']}: follows each passage's level, 4x oversampled |"]
             if report.get("saturation_law") == "env_tanh_os4_v1"
@@ -1771,6 +2007,13 @@ def write_report(path: str, plan: dict, report: dict, stems: list) -> None:
                          f"{r['deepest_mean_cut_db']:.1f} dB around {r['deepest_mean_cut_hz']:.0f} Hz"
                          for r in report["resonance"]) + " |"]
             if report.get("resonance")
+            else []
+        ),
+        *(
+            ["| drum hits sharpened (level-independent transient shaping) | "
+             + "; ".join(f"{r['track']} attack {r['attack_db']:+.1f} dB, sustain {r['sustain_db']:+.1f} dB"
+                         for r in report["transient"]) + " |"]
+            if report.get("transient")
             else []
         ),
         *(
@@ -1900,6 +2143,9 @@ def write_report(path: str, plan: dict, report: dict, stems: list) -> None:
     if ref:
         cmd += " --reference <ref.wav> --blend " + str((plan.get("style") or {}).get("blend", 0.7))
     cmd += " --out <dir>"
+    replay_law = (report.get("limiter") or {}).get("law")
+    if replay_law in (dsp.ADAPTIVE_LIMITER_LAW, FIXED_DRIVE_RELEASE_LAW):
+        cmd = "python3 -m automix.cli --render-plan <mixplan.json> --stems <dir> --out <dir>"
     lines += [
         "",
         "## Reproduce",
@@ -1908,10 +2154,14 @@ def write_report(path: str, plan: dict, report: dict, stems: list) -> None:
         cmd,
         "```",
         "",
-        "The full decision set is in `mixplan.json` next to this file.  Edit a gain",
-        "and re-render: that gain changes, and the master loudness stage compensates",
-        "for the difference across the whole mix -- which is the point of a",
-        "loudness target, and not a hidden change to the other tracks.",
+        *([
+            "Replay `mixplan.json` to apply the saved automation and limiter input gain.",
+        ] if replay_law == FIXED_DRIVE_RELEASE_LAW else [
+            "The full decision set is in `mixplan.json` next to this file.  Edit a gain",
+            "and re-render: that gain changes, and the master loudness stage compensates",
+            "for the difference across the whole mix -- which is the point of a",
+            "loudness target, and not a hidden change to the other tracks.",
+        ]),
         "",
     ]
     with open(path, "w", encoding="utf-8") as fh:

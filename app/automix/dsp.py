@@ -709,7 +709,8 @@ LIMITER_RELEASE_DB_PER_S = 30.0
 LIMITER_ATTACK_DB_PER_MS = 1.0
 
 
-def _tp_gain_curve_release(seg: np.ndarray, sr: int, ceil: float, oversample: int) -> np.ndarray:
+def _tp_gain_curve_release(seg: np.ndarray, sr: int, ceil: float, oversample: int,
+                           *, adaptive: bool = False) -> np.ndarray:
     """Like _tp_gain_curve, but shaped like a mastering limiter.
 
     The fast curve lets go of a peak within ~2 ms, so on a loud mix the gain
@@ -731,8 +732,19 @@ def _tp_gain_curve_release(seg: np.ndarray, sr: int, ceil: float, oversample: in
     rate = sr * oversample / dec  # control samples per second
     need_db = np.maximum(0.0, 20.0 * np.log10(np.maximum(mag_d, 1e-12) / ceil))
     idx = np.arange(need_db.size, dtype=np.float64)
-    rel = LIMITER_RELEASE_DB_PER_S / rate
-    held = np.maximum.accumulate(need_db + rel * idx) - rel * idx
+    if adaptive:
+        # Release isolated peaks faster, but retain the slower recovery during
+        # sustained limiting. Measure the duty cycle over the last 50 ms.
+        index = np.arange(need_db.size)
+        start = np.maximum(0, index + 1 - round(0.05 * rate))
+        count = np.r_[0, np.cumsum(need_db > 0.5)]
+        duty = (count[index + 1] - count[start]) / (index + 1 - start)
+        velocity = 30.0 + 30.0 * np.clip((0.12 - duty) / 0.10, 0, 1)
+        travel = np.cumsum(velocity / rate)
+        held = np.maximum.accumulate(need_db + travel) - travel
+    else:
+        rel = LIMITER_RELEASE_DB_PER_S / rate
+        held = np.maximum.accumulate(need_db + rel * idx) - rel * idx
     att = LIMITER_ATTACK_DB_PER_MS * 1000.0 / rate
     rev = held[::-1]
     ridx = np.arange(rev.size, dtype=np.float64)
@@ -749,7 +761,8 @@ def _tp_gain_curve_release(seg: np.ndarray, sr: int, ceil: float, oversample: in
     return gain[: seg.shape[0]]
 
 
-LIMITER_LAWS = ("tp_fast_v1", "tp_release_v1")
+ADAPTIVE_LIMITER_LAW = "tp_adaptive_release_v1"
+LIMITER_LAWS = ("tp_fast_v1", "tp_release_v1", ADAPTIVE_LIMITER_LAW)
 
 
 def true_peak_limit(
@@ -789,15 +802,19 @@ def true_peak_limit(
     bs = max(1, int(block_s * sr))
     # the release law holds attenuation for longer than the fast one: give
     # each block enough context that a release never stops at its edge
-    pad = min(n, int((1.0 if law == "tp_release_v1" else 0.25) * sr))
+    release_law = law in ("tp_release_v1", ADAPTIVE_LIMITER_LAW)
+    pad = min(n, int((1.0 if release_law else 0.25) * sr))
     gain = np.ones(n, dtype=np.float64)
 
     start = 0
     while start < n:
         lo = max(0, start - pad)
         hi = min(n, start + bs + pad)
-        curve = _tp_gain_curve_release if law == "tp_release_v1" else _tp_gain_curve
-        g = curve(x[lo:hi], sr, ceil, oversample)
+        if law == ADAPTIVE_LIMITER_LAW:
+            g = _tp_gain_curve_release(x[lo:hi], sr, ceil, oversample, adaptive=True)
+        else:
+            curve = _tp_gain_curve_release if release_law else _tp_gain_curve
+            g = curve(x[lo:hi], sr, ceil, oversample)
         np.minimum(gain[lo:hi], g, out=gain[lo:hi])
         start += bs
 
@@ -1532,6 +1549,85 @@ def vocal_double(x: np.ndarray, sr: int, spec: dict) -> np.ndarray:
                             ("lowpass", min(float(spec.get("lpf_hz", 9000.0)), sr * 0.45), 0.0, 0.707)])
 
 
+# ------------------------------------------------ R126 drum transient shaping
+
+#: R126: a level-independent transient shaper for close drum mics (the
+#: "differential envelope" behaviour SPL published for the Transient Designer:
+#: two followers of the same level, one quicker than the other, and their
+#: *difference* drives the gain -- no threshold, so a soft hit and a loud hit
+#: get the same dB of shaping).  Plans without a track's ``transient`` block
+#: are not touched.
+TRANSIENT_LAWS = ("transient_diff_env_v1",)
+#: the hit detector: a peak hold that falls 20 dB per TRANSIENT_HIT_RELEASE_MS,
+#: against its own trailing mean over ``attack_ms``.  The slow fall keeps a
+#: 50 Hz kick body from looking like a row of hits (it sags 1.6 dB per half
+#: cycle; TRANSIENT_HIT_DEAD_DB swallows that).
+TRANSIENT_HIT_RELEASE_MS = 100.0
+TRANSIENT_HIT_DEAD_DB = 1.5
+#: the decay detector: a slow peak hold (20 dB per ``sustain_ms``) against a
+#: quick one; how far the sound has fallen from its own recent peak.
+TRANSIENT_DECAY_RELEASE_MS = 40.0
+TRANSIENT_DECAY_DEAD_DB = 3.0
+#: both differences reach the full attack_db / sustain_db this far past the dead zone
+TRANSIENT_FULL_DB = 10.5
+TRANSIENT_SUSTAIN_SMOOTH_MS = 10.0
+TRANSIENT_GAIN_SMOOTH_MS = 2.0
+TRANSIENT_LOOKAHEAD_MS = 1.0
+TRANSIENT_FLOOR_DB = 120.0
+
+
+def _peak_hold_db(level_db: np.ndarray, sr: int, release_ms: float) -> np.ndarray:
+    """Rises at once, falls in a straight line of 20 dB per ``release_ms`` (key_envelope_db's rule)."""
+    slope = 20.0 / max(1.0, sr * release_ms / 1000.0)
+    ramp = slope * np.arange(level_db.shape[0], dtype=np.float64)
+    return np.maximum.accumulate(level_db + ramp) - ramp
+
+
+def transient_gain_db(x: np.ndarray, sr: int, spec: dict) -> np.ndarray:
+    """The shaper's gain curve in dB (one value per frame, channels linked)."""
+    if spec.get("law") not in TRANSIENT_LAWS:
+        raise ValueError(f"unknown transient law {spec.get('law')!r}")
+    attack_db, sustain_db = float(spec["attack_db"]), float(spec["sustain_db"])
+    mag = np.max(np.abs(x), axis=1) if x.ndim == 2 else np.abs(x)
+    n = mag.shape[0]
+    if n == 0 or float(mag.max()) <= EPS:
+        return np.zeros(n)
+    level = 20.0 * np.log10(np.maximum(mag.astype(np.float64), EPS))
+    # digital silence is floored relative to the track's own peak, not at an
+    # absolute level: otherwise the first hit after silence would be shaped a
+    # touch differently on a quiet track than on a loud one
+    level = np.maximum(level, float(level.max()) - TRANSIENT_FLOOR_DB)
+    fast = _peak_hold_db(level, sr, TRANSIENT_HIT_RELEASE_MS)
+    g = np.zeros(n)
+    if abs(attack_db) > 1e-9:
+        slow = _box_trailing(fast, max(1, int(sr * float(spec["attack_ms"]) / 1000.0)))
+        rise = np.clip((fast - slow - TRANSIENT_HIT_DEAD_DB) / TRANSIENT_FULL_DB, 0.0, 1.0)
+        g += attack_db * rise
+    if abs(sustain_db) > 1e-9:
+        quick = _peak_hold_db(level, sr, TRANSIENT_DECAY_RELEASE_MS)
+        held = _peak_hold_db(level, sr, float(spec["sustain_ms"]))
+        fall = np.clip((held - quick - TRANSIENT_DECAY_DEAD_DB) / TRANSIENT_FULL_DB, 0.0, 1.0)
+        g += sustain_db * _box_smooth(fall, max(1, int(sr * TRANSIENT_SUSTAIN_SMOOTH_MS / 1000.0)))
+    # bleed and noise far under the track's own hits are left as they are
+    g[fast < float(level.max()) - float(spec["range_db"])] = 0.0
+    g = _box_smooth(g, max(1, int(sr * TRANSIENT_GAIN_SMOOTH_MS / 1000.0)))
+    # offline lookahead: the ramp lands just before the hit instead of inside it
+    look = int(sr * TRANSIENT_LOOKAHEAD_MS / 1000.0)
+    if look > 0:
+        g = np.concatenate([g[look:], np.full(min(look, n), g[-1])])[:n]
+    return g
+
+
+def transient_shape(x: np.ndarray, sr: int, spec: dict) -> tuple[np.ndarray, dict]:
+    """Sharpen (or soften) the hits and lengthen (or shorten) what follows them."""
+    g = transient_gain_db(x, sr, spec)
+    if not np.any(g):
+        return x, {"max_gain_db": 0.0, "min_gain_db": 0.0}
+    lin = np.power(10.0, g / 20.0).astype(x.dtype, copy=False)
+    y = x * lin[:, None] if x.ndim == 2 else x * lin
+    return y, {"max_gain_db": round(float(g.max()), 2), "min_gain_db": round(float(g.min()), 2)}
+
+
 # ------------------------------------------- R122 dynamic resonance suppression
 
 #: R122: narrow, moving resonances on the lead vocal (harshness 2-8 kHz,
@@ -1716,6 +1812,25 @@ def crossover_lowpass(x: np.ndarray, sr: int, fc: float) -> np.ndarray:
     X = np.fft.rfft(buf, nf, axis=0)
     y = np.fft.irfft(X * (H[:, None] if x.ndim == 2 else H), nf, axis=0)
     return y[pad: pad + n].astype(x.dtype, copy=False)
+
+
+def drum_upper_band(x: np.ndarray, sr: int) -> np.ndarray:
+    return zero_phase_butterworth_band(x, sr, 6000.0, 10500.0)
+
+
+def zero_phase_butterworth_band(x: np.ndarray, sr: int, lo_hz: float, hi_hz: float) -> np.ndarray:
+    """Zero-phase magnitude of the forward/backward 4th-order Butterworth band."""
+    pad = min(len(x) - 1, round(.04 * sr))
+    padded = np.pad(x, ((pad, pad), (0, 0)), mode="reflect", reflect_type="odd")
+    size = _next_fast_len(len(padded))
+    frequency = np.fft.rfftfreq(size, 1 / sr)
+    low, high = np.tan(np.pi * np.array([lo_hz, hi_hz]) / sr)
+    # Round-off can place the last FFT bin just above Nyquist.
+    warped = np.tan(np.minimum(np.pi * frequency / sr, np.pi / 2))
+    scaled = (warped**2 - low * high) / (np.maximum(warped, 1e-30) * (high - low))
+    response = 1 / (1 + scaled**8)
+    spectrum = np.fft.rfft(padded, size, axis=0)
+    return np.fft.irfft(spectrum * response[:, None], size, axis=0)[pad:pad + len(x)]
 
 
 def kick_fundamental_hz(x: np.ndarray, sr: int) -> float | None:

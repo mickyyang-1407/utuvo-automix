@@ -75,6 +75,7 @@
     "vocal_double_db": -16.0,
     "kick_duck_db": 1.5,
     "drum_parallel": 0.225,
+    "drum_transient": 1.0,
     "drum_forward_db": 2.0,
     "bass_forward_db": 0.0,
     "vocal_lift_db": 0.0,

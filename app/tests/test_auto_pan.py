@@ -487,10 +487,12 @@ def test_balanced_stereo_declared_stems_get_no_automatic_spread():
         source_balance_profile="balanced_stems",
     )
     assert _plan_pans(plan) == {"synth_a": 0.0, "synth_b": 0.0}
-    # the spread really would have applied: the same stems under the default
-    # declaration are placed apart
+    # R125: under the default declaration two files whose channels differ are
+    # no longer spread either -- a pan slot on a stereo file is a balance move
+    # that turns one of its channels down (tests/test_glued_sides_and_takes.py)
     plain = _stereo_plan(("synth_a.wav", "synth"), ("synth_b.wav", "synth"))
-    assert set(_plan_pans(plain).values()) != {0.0}
+    assert set(_plan_pans(plain).values()) == {0.0}
+    assert all(any("stereo file" in line for line in lines) for lines in _plan_evidence(plain).values())
 
 
 def test_balanced_stereo_declared_stems_get_no_automatic_named_side():
