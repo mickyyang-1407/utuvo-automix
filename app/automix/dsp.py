@@ -1557,7 +1557,29 @@ def vocal_double(x: np.ndarray, sr: int, spec: dict) -> np.ndarray:
 #: *difference* drives the gain -- no threshold, so a soft hit and a loud hit
 #: get the same dB of shaping).  Plans without a track's ``transient`` block
 #: are not touched.
-TRANSIENT_LAWS = ("transient_diff_env_v1",)
+TRANSIENT_LAWS = ("transient_diff_env_v1", "transient_key_v1")
+#: R127: transient_key_v1 shapes a hit only where the drum's own band says it
+#: was hit.  Measured on a raw 13-mic kit (the owner's session, 2026-11-12): on
+#: the kick and snare-top mics about half of what v1 sharpened was the other
+#: drums' bleed (the kick mic followed every snare hit, the snare top every
+#: kick and many hats).  In the drum's own band that bleed sat 30-37 dB under
+#: the mic's own hits; in the full band only 13-15 dB, too close to the soft
+#: hits to tell apart.  So the key is: in ``key_hz``, 5 ms energy 4 ms after a
+#: moment against 15 ms before it rises more than ``key_rise_db`` and lands
+#: within ``key_range_db`` of the band's loud end (99.5th percentile).  The
+#: gate stays open TRANSIENT_KEY_HOLD_MS after it opens, so the whole attack
+#: ramp passes; the decay term is not keyed.
+TRANSIENT_KEY_WINDOW_MS = 5.0
+TRANSIENT_KEY_AHEAD_MS = 4.0
+TRANSIENT_KEY_LAG_MS = 15.0
+TRANSIENT_KEY_HOLD_MS = 25.0
+TRANSIENT_KEY_REF_PCT = 99.5
+#: the key band ends at most here (a band edge at Nyquist breaks the filter)
+TRANSIENT_KEY_MAX_FRACTION = 0.45
+TRANSIENT_KEY_MIN_FRAMES = 64
+#: the band-pass runs on 30 s blocks with 1 s of the real neighbours either side
+TRANSIENT_KEY_BLOCK_S = 30.0
+TRANSIENT_KEY_CONTEXT_S = 1.0
 #: the hit detector: a peak hold that falls 20 dB per TRANSIENT_HIT_RELEASE_MS,
 #: against its own trailing mean over ``attack_ms``.  The slow fall keeps a
 #: 50 Hz kick body from looking like a row of hits (it sags 1.6 dB per half
@@ -1583,6 +1605,52 @@ def _peak_hold_db(level_db: np.ndarray, sr: int, release_ms: float) -> np.ndarra
     return np.maximum.accumulate(level_db + ramp) - ramp
 
 
+def transient_key_gate(x: np.ndarray, sr: int, spec: dict) -> np.ndarray:
+    """R127: True where the drum's own band (``key_hz``) has just been hit."""
+    x2 = x if x.ndim == 2 else x[:, None]
+    n = x2.shape[0]
+    lo, hi = (float(v) for v in spec["key_hz"])
+    hi = min(hi, TRANSIENT_KEY_MAX_FRACTION * sr)
+    if not 0.0 < lo < hi:
+        raise ValueError(f"key band {spec['key_hz']} has nothing left under {TRANSIENT_KEY_MAX_FRACTION * sr:.0f} Hz")
+    if n < TRANSIENT_KEY_MIN_FRAMES:
+        return np.zeros(n, dtype=bool)
+    # the band's 5 ms energy in dB, in blocks with real audio either side (the band-pass
+    # and the window both see their true neighbours), kept as float32: on a 10-minute
+    # 96 kHz track the gate adds well under a GB instead of several
+    block, ctx = int(TRANSIENT_KEY_BLOCK_S * sr), int(TRANSIENT_KEY_CONTEXT_S * sr)
+    win = max(1, int(sr * TRANSIENT_KEY_WINDOW_MS / 1000.0))
+    box = np.empty(n, dtype=np.float32)
+    for start in range(0, n, block):
+        end = min(n, start + block)
+        a, b = max(0, start - ctx), min(n, end + ctx)
+        y = zero_phase_butterworth_band(np.asarray(x2[a:b], dtype=np.float64), sr, lo, hi)
+        box[start:end] = _box_trailing(np.max(y * y, axis=1), win)[start - a:end - a]
+        del y
+    pmax = float(box.max())
+    if not pmax > 0.0:
+        return np.zeros(n, dtype=bool)
+    # relative to the band's own loudest moment before the log, so a quiet track and a
+    # loud one agree and nothing under float32's range turns into -inf
+    box /= np.float32(pmax)
+    e = np.log10(np.maximum(box, np.float32(1e-30)), out=box)
+    e *= np.float32(10.0)
+    ref = float(np.percentile(e, TRANSIENT_KEY_REF_PCT))
+    np.maximum(e, np.float32(ref - TRANSIENT_FLOOR_DB), out=e)
+    ahead, lag = int(sr * TRANSIENT_KEY_AHEAD_MS / 1000.0), int(sr * TRANSIENT_KEY_LAG_MS / 1000.0)
+    ahead, lag = min(ahead, n), min(lag, n)
+    after = np.empty_like(e)                                   # e[i + ahead], held at the end
+    after[:n - ahead] = e[ahead:]
+    after[n - ahead:] = e[-1]
+    rise = after.copy()                                        # minus e[i - lag], held at the start
+    rise[lag:] -= e[:n - lag]
+    rise[:lag] -= e[0]
+    hit = (rise > float(spec["key_rise_db"])) & (after > ref - float(spec["key_range_db"]))
+    del rise, after
+    hold = max(1, int(sr * TRANSIENT_KEY_HOLD_MS / 1000.0))
+    return _box_trailing(hit.astype(np.float64), hold) > 0.0
+
+
 def transient_gain_db(x: np.ndarray, sr: int, spec: dict) -> np.ndarray:
     """The shaper's gain curve in dB (one value per frame, channels linked)."""
     if spec.get("law") not in TRANSIENT_LAWS:
@@ -1602,6 +1670,8 @@ def transient_gain_db(x: np.ndarray, sr: int, spec: dict) -> np.ndarray:
     if abs(attack_db) > 1e-9:
         slow = _box_trailing(fast, max(1, int(sr * float(spec["attack_ms"]) / 1000.0)))
         rise = np.clip((fast - slow - TRANSIENT_HIT_DEAD_DB) / TRANSIENT_FULL_DB, 0.0, 1.0)
+        if spec["law"] == "transient_key_v1":
+            rise = rise * transient_key_gate(x, sr, spec)
         g += attack_db * rise
     if abs(sustain_db) > 1e-9:
         quick = _peak_hold_db(level, sr, TRANSIENT_DECAY_RELEASE_MS)

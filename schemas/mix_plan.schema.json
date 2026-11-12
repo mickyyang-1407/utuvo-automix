@@ -959,7 +959,8 @@
           "properties": {
             "law": {
               "enum": [
-                "transient_diff_env_v1"
+                "transient_diff_env_v1",
+                "transient_key_v1"
               ]
             },
             "attack_db": {
@@ -986,6 +987,62 @@
               "type": "number",
               "minimum": 10,
               "maximum": 80
+            },
+            "key_hz": {
+              "description": "R127 (transient_key_v1): the drum's own band; a hit is shaped only where this band rises (dsp.transient_key_gate).",
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": {
+                "type": "number",
+                "minimum": 20,
+                "maximum": 20000
+              }
+            },
+            "key_rise_db": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 20
+            },
+            "key_range_db": {
+              "type": "number",
+              "minimum": 10,
+              "maximum": 60
+            }
+          },
+          "if": {
+            "properties": {
+              "law": {
+                "const": "transient_key_v1"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "key_hz",
+              "key_rise_db",
+              "key_range_db"
+            ]
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "key_hz"
+                  ]
+                },
+                {
+                  "required": [
+                    "key_rise_db"
+                  ]
+                },
+                {
+                  "required": [
+                    "key_range_db"
+                  ]
+                }
+              ]
             }
           }
         },

@@ -183,8 +183,10 @@ def test_new_plans_shape_the_close_drums_by_the_style(stems):
     planner.validate(p)
     got = _ts(p)
     assert sorted(got) == sorted([kick, snare])              # not the hats, the bass or the voice
-    assert got[kick] == {"law": "transient_diff_env_v1", "attack_db": 3.0, "sustain_db": 0.0, **planner.TRANSIENT}
-    assert got[snare] == {"law": "transient_diff_env_v1", "attack_db": 4.0, "sustain_db": -1.0, **planner.TRANSIENT}
+    assert got[kick] == {"law": "transient_key_v1", "attack_db": 3.0, "sustain_db": 0.0, **planner.TRANSIENT,
+                         "key_hz": [30.0, 150.0], **planner.TRANSIENT_KEY}
+    assert got[snare] == {"law": "transient_key_v1", "attack_db": 4.0, "sustain_db": -1.0, **planner.TRANSIENT,
+                          "key_hz": [150.0, 1000.0], **planner.TRANSIENT_KEY}
     assert any("transient shaping" in e for t in p["tracks"] if t["id"] == snare for e in t["evidence"])
     metal = _ts(planner.build_plan(stems, planner.load_preset("heavy_rock_metal")))
     assert metal[snare]["attack_db"] == 5.0 and metal[snare]["sustain_db"] == -1.25
@@ -348,3 +350,196 @@ def test_a_mix_matched_to_a_reference_keeps_the_budget_on_both_passes(stems, tmp
     p, _, report = pipeline.mix(stems, planner.load_preset("rock"), reference=ref)
     assert shaped == [True, True] and report["reference_passes"] == 2
     assert ("transient" in report) == bool(_ts(p))
+
+
+
+# ------------------------------------------------- R127: keyed on the drum's own band
+
+KEYED = {**SPEC, "law": "transient_key_v1", "sustain_db": 0.0, "key_hz": [30.0, 150.0], **planner.TRANSIENT_KEY}
+
+
+def _snare_crack(n=SR // 4, seed=5):
+    """A snare as a kick mic hears it: noise with nothing under ~250 Hz."""
+    t = np.arange(n) / SR
+    v = np.random.default_rng(seed).standard_normal(n) * np.exp(-t / 0.05)
+    return dsp.apply_eq(_st(v), SR, [("highpass", 250.0, 0.0, 0.707), ("highpass", 250.0, 0.0, 0.707)])[:, 0]
+
+
+def _kick_mic(bleed_db=-12.0, level=0.5):
+    """Kick hits every 0.5 s, the snare's bleed every 0.5 s in between, as one close kick mic."""
+    n = SR * 4
+    out = np.zeros(n)
+    k, s = _kick(SR // 3), _snare_crack()
+    for start in range(HIT, n - k.size, SR // 2):
+        out[start:start + k.size] += k
+    bleed_at = list(range(HIT + SR // 4, n - s.size, SR // 2))
+    for start in bleed_at:
+        out[start:start + s.size] += 10 ** (bleed_db / 20) * s
+    return level * out, bleed_at
+
+
+def _events(g):
+    return np.flatnonzero((g[1:] > 1.0) & (g[:-1] <= 1.0)) + 1
+
+
+def test_the_keyed_law_leaves_another_drums_bleed_alone_and_keeps_every_own_hit():
+    x, bleed_at = _kick_mic()
+    v1 = dsp.transient_gain_db(x, SR, {**KEYED, "law": "transient_diff_env_v1"})
+    key = dsp.transient_gain_db(x, SR, KEYED)
+    near_bleed = lambda g: [g[b - SR // 400:b + SR // 50].max() for b in bleed_at]
+    assert min(near_bleed(v1)) > 2.0                  # v1 sharpens the snare's crack in the kick mic ...
+    assert max(near_bleed(key)) == 0.0                # ... the keyed law does not touch it
+    kicks = list(range(HIT, x.size - SR // 3, SR // 2))
+    assert min(key[k:k + SR // 100].max() for k in kicks) > 3.9   # every kick still gets its full attack
+    assert _events(key).size == len(kicks)
+
+
+def test_the_keyed_law_is_level_independent_too():
+    x, _ = _kick_mic()
+    loud = dsp.transient_gain_db(x, SR, KEYED)
+    soft = dsp.transient_gain_db(x * 10 ** (-30 / 20), SR, KEYED)
+    assert np.max(np.abs(loud - soft)) < 1e-6
+
+
+def test_the_gate_covers_the_whole_attack_ramp():
+    x, _ = _kick_mic(bleed_db=-200.0)
+    full = dsp.transient_gain_db(x, SR, {**KEYED, "law": "transient_diff_env_v1"})
+    keyed = dsp.transient_gain_db(x, SR, KEYED)
+    assert np.max(np.abs(full - keyed)) < 1e-9        # with no bleed at all the two laws agree to the sample
+
+
+def test_the_decay_term_is_not_keyed():
+    x, _ = _kick_mic()
+    spec = {**KEYED, "attack_db": 0.0, "sustain_db": -2.0}
+    assert np.array_equal(dsp.transient_gain_db(x, SR, spec), dsp.transient_gain_db(x, SR, {**spec, "law": "transient_diff_env_v1"}))
+
+
+def test_a_whole_kit_stem_keeps_the_unkeyed_law():
+    assert set(planner.TRANSIENT_KEY_HZ) == {"kick", "snare", "toms"}
+    assert "drums_full" in planner.TRANSIENT_ROLE_DB and "drums_full" not in planner.TRANSIENT_KEY_HZ
+
+
+@pytest.mark.parametrize("bad", [{"key_hz": [150.0, 30.0]}, {"key_hz": [10.0, 150.0]}, {"key_hz": [30.0]},
+                                 {"key_hz": "30-150"}, {"key_hz": [30.0, True]}, {"key_rise_db": 0.5},
+                                 {"key_range_db": 70.0}, {"key_range_db": float("nan")}])
+def test_a_wrong_key_is_refused(stems, bad):
+    p = planner.build_plan(stems, planner.load_preset("rock"))
+    t = next(t for t in p["tracks"] if (t.get("transient") or {}).get("law") == "transient_key_v1")
+    t["transient"].update(bad)
+    with pytest.raises(render.RenderError):
+        render.render(stems, p)
+
+
+def test_the_schema_ties_the_key_fields_to_the_keyed_law(stems):
+    p = planner.build_plan(stems, planner.load_preset("rock"))
+    t = next(t for t in p["tracks"] if (t.get("transient") or {}).get("law") == "transient_key_v1")
+    missing = copy.deepcopy(p)
+    next(x for x in missing["tracks"] if x["id"] == t["id"])["transient"].pop("key_hz")
+    with pytest.raises(jsonschema.ValidationError):
+        planner.validate(missing)
+    stray = copy.deepcopy(p)
+    next(x for x in stray["tracks"] if x["id"] == t["id"])["transient"]["law"] = "transient_diff_env_v1"
+    with pytest.raises(jsonschema.ValidationError):
+        planner.validate(stray)
+
+
+def test_a_test4_plan_with_the_unkeyed_law_still_renders_as_it_did(stems):
+    p = planner.build_plan(stems, planner.load_preset("rock"))
+    old = copy.deepcopy(p)
+    for t in old["tracks"]:
+        ts = t.get("transient")
+        if ts:
+            t["transient"] = {k: v for k, v in ts.items() if not k.startswith("key_")} | {"law": "transient_diff_env_v1"}
+    planner.validate(old)
+    mix, rep = render.render(stems, old)
+    assert all(r["max_gain_db"] > 3.5 for r in rep["transient"] if r["attack_db"] >= 4.0)
+
+
+def test_once_a_hit_opens_the_gate_it_stays_open_for_the_hold():
+    x, _ = _kick_mic(bleed_db=-200.0)
+    gate = dsp.transient_key_gate(x, SR, KEYED)
+    hold = int(SR * 0.025)                      # written out: a constant read from dsp could be 0 and pass on an empty slice
+    kicks = list(range(HIT, x.size - SR // 3, SR // 2))
+    assert kicks and hold > 0
+    for k in kicks:
+        assert gate[k:k + hold].all()
+
+
+def test_a_thump_far_under_the_mics_own_hits_is_not_a_hit():
+    # a quiet thump in the kick's own band (a floor tom heard by the kick mic), in a gap after the
+    # kick's ring has died: 32 dB down is inside the shaper's own range (35 dB), outside the key's (30)
+    k = _kick(SR // 2)
+    x = np.zeros(SR * 3)
+    for start in (HIT, HIT + 2 * SR):
+        x[start:start + k.size] += 0.5 * k
+    at = HIT + SR
+    x[at:at + k.size] += 10 ** (-32 / 20) * 0.5 * k
+    v1 = dsp.transient_gain_db(x, SR, {**KEYED, "law": "transient_diff_env_v1"})
+    key = dsp.transient_gain_db(x, SR, KEYED)
+    assert v1[at:at + SR // 50].max() > 2.0 and key[at:at + SR // 50].max() == 0.0
+    assert key[HIT:HIT + SR // 50].max() > 3.9 and key[HIT + 2 * SR:HIT + 2 * SR + SR // 50].max() > 3.9
+
+
+
+@pytest.mark.parametrize("sr", [22050, 44100])
+def test_a_key_band_above_what_the_rate_can_hold_is_refused(sr):
+    x = np.zeros((sr, 2))
+    with pytest.raises(ValueError):
+        dsp.transient_key_gate(x, sr, {**KEYED, "key_hz": [0.46 * sr, 0.49 * sr]})
+    assert not dsp.transient_key_gate(x, sr, {**KEYED, "key_hz": [30.0, 0.49 * sr]}).any()   # the top is clamped, not refused
+
+
+def test_a_key_band_the_tracks_rate_cannot_hold_is_refused_by_the_renderer(stems):
+    p = planner.build_plan(stems, planner.load_preset("rock"))
+    t = next(t for t in p["tracks"] if (t.get("transient") or {}).get("law") == "transient_key_v1")
+    t["transient"]["key_hz"] = [0.46 * SR, 20000.0]
+    with pytest.raises(render.RenderError):
+        render.render(stems, p)
+
+
+def test_key_fields_on_the_unkeyed_law_are_refused_by_the_renderer(stems):
+    p = planner.build_plan(stems, planner.load_preset("rock"))
+    t = next(t for t in p["tracks"] if (t.get("transient") or {}).get("law") == "transient_key_v1")
+    t["transient"]["law"] = "transient_diff_env_v1"
+    with pytest.raises(render.RenderError):
+        render.render(stems, p)
+
+
+@pytest.mark.parametrize("n", [0, 1, 63])
+def test_a_track_too_short_for_the_key_has_no_hits(n):
+    assert dsp.transient_key_gate(np.ones((n, 2)), SR, KEYED).shape == (n,)
+    assert not dsp.transient_key_gate(np.ones((n, 2)), SR, KEYED).any()
+
+
+def test_the_gate_is_level_independent_far_down():
+    x, _ = _kick_mic()
+    loud = dsp.transient_key_gate(x, SR, KEYED)
+    for db in (-60.0, -140.0, -200.0):
+        assert np.array_equal(loud, dsp.transient_key_gate(x * 10 ** (db / 20), SR, KEYED))
+
+
+def test_one_tiny_hit_in_silence_gives_a_finite_gate():
+    x = np.zeros(SR * 3)
+    k = _kick(SR // 4)
+    x[SR:SR + k.size] = 1e-9 * k                           # -180 dBFS, and digital zero everywhere else
+    with np.errstate(divide="raise", invalid="raise"):   # -inf and NaN; an underflow to 0 is floored
+        g = dsp.transient_key_gate(x, SR, KEYED)
+    # the zero-phase band-pass rings ahead of a hit in silence: the gate opens about 30 ms early
+    # (harmless: the attack term itself starts 2 ms before the hit), never earlier than 40
+    assert g[SR:SR + SR // 100].all() and not g[:SR - int(0.040 * SR)].any()
+
+
+def test_the_blocks_join_without_a_seam(monkeypatch):
+    x, _ = _kick_mic()
+    whole = dsp.transient_key_gate(x, SR, KEYED)
+    monkeypatch.setattr(dsp, "TRANSIENT_KEY_BLOCK_S", 0.37)   # many blocks, edges inside hits
+    assert np.array_equal(whole, dsp.transient_key_gate(x, SR, KEYED))
+
+
+
+def test_the_renderer_checks_the_key_band_against_the_tracks_own_rate():
+    spec = {**KEYED, "key_hz": [10000.0, 11000.0]}               # fine at 48 kHz, nothing left at 22.05 kHz
+    x = np.zeros((22050, 2), dtype=np.float32)
+    render._transient(np.zeros((SR, 2), dtype=np.float32), SR, spec, "t")
+    with pytest.raises(render.RenderError):
+        render._transient(x, 22050, spec, "t")

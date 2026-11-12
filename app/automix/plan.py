@@ -170,6 +170,12 @@ TRANSIENT = {"attack_ms": 15.0, "sustain_ms": 600.0, "range_db": 35.0}
 TRANSIENT_ROLE_DB = {"kick": (3.0, 0.0), "snare": (4.0, -1.0), "toms": (2.0, -2.0),
                      "drums_full": (1.5, 0.0), "percussion": (1.5, 0.0)}
 TRANSIENT_MAX_DB = 6.0
+#: R127: the close mics' shaping keyed on the drum's own band (dsp.transient_key_gate):
+#: the kick's 30-150 Hz, the snare's 150 Hz-1 kHz, the toms' 60-500 Hz.  A whole-kit
+#: stem and percussion have no other drum to bleed from, so they keep v1.
+TRANSIENT_KEY_LAW = "transient_key_v1"
+TRANSIENT_KEY_HZ = {"kick": [30.0, 150.0], "snare": [150.0, 1000.0], "toms": [60.0, 500.0]}
+TRANSIENT_KEY = {"key_rise_db": 6.0, "key_range_db": 30.0}
 TRANSIENT_MIN_DB = 0.25
 
 
@@ -2110,6 +2116,8 @@ def build_plan(
             if abs(sustain) < TRANSIENT_MIN_DB:
                 sustain = 0.0
             t["transient"] = {"law": TRANSIENT_LAW, "attack_db": attack, "sustain_db": sustain, **TRANSIENT}
+            if t["role"] in TRANSIENT_KEY_HZ:
+                t["transient"].update(law=TRANSIENT_KEY_LAW, key_hz=list(TRANSIENT_KEY_HZ[t["role"]]), **TRANSIENT_KEY)
             t.setdefault("evidence", []).append(
                 f"transient shaping: attack {attack:+.1f} dB on each hit"
                 + (f", decay {sustain:+.1f} dB" if sustain else "") + " (level-independent)")

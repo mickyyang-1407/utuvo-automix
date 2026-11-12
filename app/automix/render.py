@@ -764,6 +764,10 @@ TRANSIENT_BOUNDS = {"attack_db": (-6.0, 6.0), "sustain_db": (-6.0, 6.0), "attack
                     "sustain_ms": (200.0, 2000.0), "range_db": (10.0, 80.0)}
 
 
+#: R127: transient_key_v1's extra fields
+TRANSIENT_KEY_BOUNDS = {"key_rise_db": (1.0, 20.0), "key_range_db": (10.0, 60.0)}
+
+
 def _transient(x: np.ndarray, sr: int, spec: dict, tid: str) -> tuple[np.ndarray, dict]:
     """R126: a track's ``transient`` block, checked, then dsp.transient_shape."""
     if spec.get("law") not in dsp.TRANSIENT_LAWS:
@@ -772,6 +776,21 @@ def _transient(x: np.ndarray, sr: int, spec: dict, tid: str) -> tuple[np.ndarray
         v = spec.get(key)
         if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not lo <= v <= hi:
             raise RenderError(f"{tid}: transient {key} must be {lo:g}..{hi:g}, got {v!r}")
+    if spec["law"] != "transient_key_v1" and any(k in spec for k in ("key_hz", *TRANSIENT_KEY_BOUNDS)):
+        raise RenderError(f"{tid}: transient key fields belong to transient_key_v1, not {spec['law']}")
+    if spec["law"] == "transient_key_v1":
+        _num = lambda v: not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
+        band = spec.get("key_hz")
+        if not (isinstance(band, (list, tuple)) and len(band) == 2 and all(_num(v) for v in band)
+                and 20.0 <= band[0] < band[1] <= 20000.0):
+            raise RenderError(f"{tid}: transient key_hz must be [low, high] in 20..20000 Hz, got {band!r}")
+        if not band[0] < min(band[1], dsp.TRANSIENT_KEY_MAX_FRACTION * sr):
+            raise RenderError(f"{tid}: transient key_hz {band!r} has nothing left under "
+                              f"{dsp.TRANSIENT_KEY_MAX_FRACTION * sr:.0f} Hz at {sr} Hz")
+        for key, (lo, hi) in TRANSIENT_KEY_BOUNDS.items():
+            v = spec.get(key)
+            if not _num(v) or not lo <= v <= hi:
+                raise RenderError(f"{tid}: transient {key} must be {lo:g}..{hi:g}, got {v!r}")
     return dsp.transient_shape(x, sr, spec)
 
 
