@@ -146,6 +146,40 @@ DRUM_OPEN_LAW = "drum_open_v1"
 VOCAL_BUS_THRESHOLD_OFFSET_DB = 4.0
 VOCAL_BUS_MAX_ATTACK_MS = 10.0
 VOCAL_OPEN_LAW = "vocal_bus_open_v1"
+#: R130 (vocal_range_fit_v1): a lead vocal's own compressor only takes the
+#: part of the voice's envelope range that is above what a finished
+#: professional lead vocal measures.  The ruler is the R124 one: 100 ms RMS,
+#: p95 - p10 over the windows within 30 dB of the loudest.  The 46 MUSDB lead
+#: vocal stems (finished, mixed vocals) measure 12.5-21.2 dB, median 17.1.
+#: The style's fixed amount compressed every voice the same way, so a vocal
+#: that arrived already even -- compressed on the way in, or a steady
+#: singer -- was squashed a second time:
+#: 14.8 -> 10.8 dB at this one stage on a pro stem, and the owner heard the
+#: whole chain as "Vocal完全Overcompressed" on such a stem.  New plans
+#: simulate the track's level path once every gain and EQ decision is made
+#: (gain with any manual trim, ride, high-pass, corrective EQ with any hum
+#: notch, then the compressor itself, the renderer's own functions) and turn the style's
+#: compression dial down until the stage takes no more than the range above
+#: VOCAL_RANGE_TARGET_DB; a voice with more range than that keeps the
+#: style's full setting.  The rule is the one automatic-mixing research
+#: built its compressor on: more level fluctuation calls for more
+#: compression, and the right amount depends on the source (Ma et al.,
+#: JAES 63(6), 2015, control assumptions 1 and 6).  The
+#: thickness (the vocal character's parallel copy, saturation, tone) and the
+#: vocal bus are untouched.  Plain compressor numbers in the plan (receipt
+#: in comp_style_dial), so older plans render as they were.
+VOCAL_RANGE_FIT_LAW = "vocal_range_fit_v1"
+VOCAL_RANGE_TARGET_DB = 17.0
+VOCAL_RANGE_WINDOW_S = 0.1
+VOCAL_RANGE_SUNG_DB = 30.0
+#: a voice whose loudest 100 ms is under this is silence, not a range
+VOCAL_RANGE_SILENT_DB = -100.0
+#: the search: halve the interval on the style's dial this many times
+VOCAL_RANGE_FIT_STEPS = 8
+#: under this the voice is left uncompressed at its own track
+VOCAL_RANGE_MIN_AMOUNT = 0.02
+#: a fitted stage may take this much more than the excess (the search's grain)
+VOCAL_RANGE_TOLERANCE_DB = 0.25
 #: R118: the few faders a user gets after the mix ("vocal a little louder"):
 #: one dB offset per group, applied by the renderer after every automatic
 #: balance, the group's reverb and delay moving with it.  Absent = 0 dB, so
@@ -191,6 +225,86 @@ def _user_trims(group_trims: dict | None) -> dict:
         if abs(v) >= 0.05:
             out[name] = round(v, 1)
     return out
+
+
+def vocal_range_db(audio: np.ndarray, sr: int, sung: np.ndarray | None = None) -> tuple[float | None, np.ndarray | None]:
+    """The R124 vocal ruler: 100 ms RMS (all channels), p95 - p10 over the
+    windows within VOCAL_RANGE_SUNG_DB of the loudest.  ``sung`` reuses the
+    windows found on an earlier stage, so before and after are read on the
+    same syllables.  Returns (range, sung windows)."""
+    x = np.asarray(audio)
+    x = x[:, None] if x.ndim == 1 else x
+    w = max(1, int(VOCAL_RANGE_WINDOW_S * sr))
+    n = x.shape[0] // w
+    if n < 20:
+        return None, None
+    # window by window in float64, a few thousand windows at a time: no
+    # full-length float64 copy of a long stem
+    power = np.empty(n)
+    step = 2048
+    for i in range(0, n, step):
+        seg = x[i * w:min(n, i + step) * w].astype(np.float64).reshape(-1, w, x.shape[1])
+        power[i:i + seg.shape[0]] = np.mean(seg * seg, axis=(1, 2))
+    env = 10.0 * np.log10(power + 1e-20)
+    if float(env.max()) <= VOCAL_RANGE_SILENT_DB:
+        return None, None
+    if sung is None:
+        sung = env > float(env.max()) - VOCAL_RANGE_SUNG_DB
+    k = min(n, sung.shape[0])
+    v = env[:k][sung[:k]]
+    if v.size < 20:
+        return None, sung
+    return float(np.percentile(v, 95) - np.percentile(v, 10)), sung
+
+
+def _fit_vocal_comp(stem, gain_db: float, ride: list, hpf_hz: float, eq: list, amount: float,
+                    group: str) -> tuple[dict | None, dict | None]:
+    """R130 (VOCAL_RANGE_FIT_LAW): the style's compressor, turned down until it
+    takes no more of the voice's range than what lies above the target.
+    Returns (compressor or None, receipt) -- (None, None) when nothing can be
+    measured, and the caller keeps the style's compressor."""
+    from . import render  # the renderer's own level path; imported late (render imports this module)
+
+    sr = int(stem.sr)
+    x = np.asarray(stem.audio, dtype=np.float32) * np.float32(dsp.db_to_lin(gain_db))
+    if ride:
+        x = render._apply_ride(x, sr, ride)
+    if hpf_hz > 20.5:
+        x = dsp.apply_eq(x, sr, [("highpass", hpf_hz, 0.0, 0.707)])
+    bands = render._eq_bands(eq or [])
+    if bands:
+        x = dsp.apply_eq(x, sr, bands)
+    before, sung = vocal_range_db(x, sr)
+    if before is None:
+        return None, None
+    allowed = max(0.0, before - VOCAL_RANGE_TARGET_DB)
+
+    def taken(a: float) -> float:
+        if a < VOCAL_RANGE_MIN_AMOUNT:
+            return 0.0
+        y = render._apply_comp(x, sr, _comp_params(group, a), COMPRESSOR_LAW)
+        after, _ = vocal_range_db(y, sr, sung)
+        return before - after if after is not None else 0.0
+
+    style_taken = taken(amount)
+    receipt = {"law": VOCAL_RANGE_FIT_LAW, "amount": round(amount, 4),
+               "range_in_db": round(before, 2), "target_db": VOCAL_RANGE_TARGET_DB,
+               "style_takes_db": round(style_taken, 2)}
+    if style_taken <= allowed + VOCAL_RANGE_TOLERANCE_DB:
+        return _comp_params(group, amount), dict(receipt, fit_amount=round(amount, 4), takes_db=round(style_taken, 2))
+    lo, hi = 0.0, amount
+    for _ in range(VOCAL_RANGE_FIT_STEPS):
+        mid = 0.5 * (lo + hi)
+        if taken(mid) <= allowed + VOCAL_RANGE_TOLERANCE_DB:
+            lo = mid
+        else:
+            hi = mid
+    # floor, never round up: rounding could step into the amount that takes too much
+    fit = math.floor(lo * 1e4) / 1e4
+    receipt.update(fit_amount=fit, takes_db=round(taken(fit), 2))
+    if fit < VOCAL_RANGE_MIN_AMOUNT:
+        return None, dict(receipt, fit_amount=0.0, takes_db=0.0)
+    return _comp_params(group, fit), receipt
 
 
 def _open_drum_track_comp(spec: dict) -> tuple[dict, dict]:
@@ -1670,6 +1784,7 @@ def build_plan(
     width_style = float(preset.get("width", 1.0))
 
     tracks = []
+    vocal_comp_dials: dict[str, tuple[float, str]] = {}
     skipped_dense: list[str] = []
     # The facts about each imported source, kept apart from the decisions the
     # planner builds on top of them: a protected member keeps the facts and
@@ -1779,6 +1894,9 @@ def build_plan(
                 f"same-song rough mix relative correction {fitted[track['id']]:+.3f} dB included once in gain_db; "
                 f"common fit gain {decision['proof']['common_gain_db']:+.3f} dB is unapplied; proof is before processing"
             )
+        if comp_block and s.role == "lead_vocal" and tid not in grouped_ids:
+            # R130: fitted once every gain and EQ decision is made (below)
+            vocal_comp_dials[tid] = (amount, group)
         if comp_block:
             track["comp"] = comp_block
         if comp_dial:
@@ -1968,6 +2086,28 @@ def build_plan(
                 )
 
     _backing_stack_ceiling(stems, tracks, grouped_ids, trims)
+
+    # R130 (VOCAL_RANGE_FIT_LAW): each lead vocal's compressor, fitted on the
+    # level path the renderer will really give it -- after the manual trims,
+    # the hum notch and every other gain and EQ decision above.
+    for s, t in zip(stems, tracks):
+        if t["id"] not in vocal_comp_dials or not t.get("comp"):
+            continue
+        amount, group = vocal_comp_dials[t["id"]]
+        fitted_comp, fit_receipt = _fit_vocal_comp(s, float(t["gain_db"]), t.get("ride") or [],
+                                                   float(t.get("hpf_hz", 20.0)), t.get("eq") or [], amount, group)
+        if fit_receipt is None:
+            continue
+        if fitted_comp is None:
+            t.pop("comp", None)
+        else:
+            t["comp"] = fitted_comp
+        t["comp_style_dial"] = fit_receipt
+        if fit_receipt["fit_amount"] < fit_receipt["amount"]:
+            t["evidence"].append(
+                f"vocal compression {fit_receipt['amount']:.2f} -> {fit_receipt['fit_amount']:.2f}: the voice "
+                f"spans {fit_receipt['range_in_db']:.1f} dB, the style's setting would take "
+                f"{fit_receipt['style_takes_db']:.1f} dB of it, the target is {VOCAL_RANGE_TARGET_DB:.0f} dB")
 
     for t in tracks:
         if t["id"] in fit_expected:

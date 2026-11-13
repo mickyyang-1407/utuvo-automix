@@ -867,7 +867,7 @@
           "default": []
         },
         "comp_style_dial": {
-          "description": "R117 receipt (drum_open_v1): what the style's compression dial alone would have written into comp (ratio, attack_ms; for the drum bus also threshold_db and threshold_offset_db) before new plans opened up the drums. The renderer does not read it.",
+          "description": "R117 receipt (drum_open_v1): what the style's compression dial alone would have written into comp (ratio, attack_ms; for the drum bus also threshold_db and threshold_offset_db) before new plans opened up the drums. R130 adds vocal_range_fit_v1 on lead vocal tracks: the style's dial (amount), the dial the planner fitted (fit_amount), the voice's envelope range on its way into the compressor (range_in_db: 100 ms RMS, p95 - p10 over windows within 30 dB of the loudest), the target (target_db) and how much of that range the style's setting and the fitted setting take (style_takes_db, takes_db). The renderer does not read it.",
           "type": "object"
         },
         "comp": {

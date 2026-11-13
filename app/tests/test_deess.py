@@ -102,6 +102,16 @@ def test_render_reduces_sibilance_without_moving_the_body():
     analyze.detect_roles([st])
     analyze.measure(st)
     p = planner.build_plan([st], planner.load_preset("pop_2020s"))
+    # R130: this voice is a steady tone with noise bursts 10 dB above it.  The
+    # style's compressor used to flatten those bursts before the de-esser; new
+    # plans fit the compressor to the voice's range and barely compress it, so
+    # with the de-esser removed the master limiter catches the bursts instead
+    # and the whole-render comparison below would measure the limiter, not the
+    # de-esser.  The comparison keeps the style's compressor (as before R130);
+    # test_render_deesser_works_with_the_fitted_compressor covers the new plan.
+    t = p["tracks"][0]
+    assert t["comp_style_dial"]["law"] == "vocal_range_fit_v1"
+    t["comp"] = planner._comp_params("vocal", t["comp_style_dial"]["amount"])
     on, _ = render.render([st], p, {"decay_s": 0.3, "predelay_ms": 0.0})
 
     import copy
@@ -115,3 +125,28 @@ def test_render_reduces_sibilance_without_moving_the_body():
     # the sibilance down changes what the limiter does to the rest.  The band
     # itsself is untouched, which `test_deess_only_touches_the_high_band` checks.
     assert abs(20 * np.log10(band(on, 200, 1000) / band(off, 200, 1000))) < 1.5
+
+
+def test_render_deesser_works_with_the_fitted_compressor():
+    """R130: with the plan's own (fitted) compressor the de-esser, where the
+    renderer applies it, takes the bursts down as much as on its own."""
+    st = analyze.Stem(name="vocal_lead.wav", path="v", audio=vocal(0.8), sr=SR)
+    analyze.detect_roles([st])
+    analyze.measure(st)
+    p = planner.build_plan([st], planner.load_preset("pop_2020s"))
+    assert "deess" in p["tracks"][0]
+    seen = {}
+    orig = dsp.deess
+
+    def spy(x, sr, *a, **k):
+        y = orig(x, sr, *a, **k)
+        seen["in"], seen["out"] = np.array(x), np.array(y)
+        return y
+
+    dsp.deess = spy
+    try:
+        render.render([st], p, {"decay_s": 0.3, "predelay_ms": 0.0})
+    finally:
+        dsp.deess = orig
+    assert band(seen["out"], 6000, 9000) / band(seen["in"], 6000, 9000) < 0.6
+    assert abs(20 * np.log10(band(seen["out"], 200, 1000) / band(seen["in"], 200, 1000))) < 0.1
