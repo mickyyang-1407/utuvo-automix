@@ -527,7 +527,7 @@ _LEAD_VOCAL_RE = re.compile(r"(?<![a-z])(?:lead|ld|lv|vx)(?![a-z])")
 _VOCAL_WORDS: tuple[tuple[tuple[str, ...], str], ...] = (
     # not "backing": a backing track is the band (test_mic_filename_roles)
     (("adlib", "adlibs", "ad lib", "ad libs", "harm", "harms", "choir",
-      "ooh", "oohs", "aah", "aahs"), "backing_vocal"),
+      "ooh", "oohs", "aah", "aahs", "gang", "backups"), "backing_vocal"),
     (("rap", "topline"), "lead_vocal"),
 )
 
@@ -623,7 +623,81 @@ def _alias_role(key: str) -> tuple[str | None, str]:
     return spans[0][2], "".join(parts)
 
 
+#: R131: a vocal that says it stands behind the lead is a backing vocal.
+#: "Back Vox", "Backup Vocal", "BG Vox", "Bkg Vox", "Gang Vox", "Vox Stack"
+#: have a vocal word in them, so they used to be mixed as the lead: the lead's
+#: level, the lead's compressor, the centre.  (Measured on real sessions: three
+#: "vox_back_c/l/r" tracks were three more lead vocals.)  Whole words only, and
+#: only where the name was read as a lead vocal: "Back Kick" stays a kick.
+#: Not here, on purpose: "chorus" / "2nd" / "hi" / "low" (a lead split by song
+#: section, the second singer of a duet), "double" ("Lead Dbl" is the lead's
+#: double, see _LATE_VOCAL), "group" (a vocal group bus) and "bk" (a backup
+#: copy of a file).
+_BEHIND_WORDS = ("back", "backup", "background", "bg", "bgd", "bkg", "bkgd", "bck", "gang", "crowd", "stack")
+#: the same words glued to the vocal word ("BackVox 2", "GangVocals")
+_BEHIND_GLUED_RE = re.compile(r"(?<![a-z])(?:back|backup|background|bg|bgd|bkg|bkgd|bck|gang|crowd|stack)(?:vox|vocals?|voc)(?![a-z])")
+#: ...unless the name also says lead: "Lead Vox bk" is a copy of the lead.
+_SAYS_LEAD_RE = re.compile(r"(?<![a-z])(?:lead|ld|lv|main)(?![a-z])")
+
+
+#: R131: "harmony" beside an instrument is that instrument playing a harmony
+#: line ("guitar_electric_solo_harmony" was mixed as a backing vocal: vocal
+#: bus, de-esser, vocal reverb).  The name is read again without the word; a
+#: name that is still a vocal then ("Vox Harmony"), or says nothing ("Harmony
+#: 2"), stays a backing vocal.
+_HARMONY_RE = re.compile(r"harmon(?:y|ies)")
+
+#: R131: a recorder's own track names.  A DAW export appends the playlist and
+#: the take after a dot ("SNT.13_02", "KI.13_02", "PN.1_01"), and "." was not
+#: a separator, so none of these was ever read: on the session this was
+#: reported from, 19 of 49 roles were set by hand.  Only reached when the name
+#: said nothing before; the dot is a separator on that second reading only.
+#: Drum-mic codes are short enough to be something else, so they count only
+#: when nothing but numbers and a side follows ("KO2.13_02", not "KO Theme");
+#: the instrument codes may carry a part name ("AG_Mute 01", "AG 01_Intro").
+#: "Rt" / "Lt" are sides, not a rack tom.  A bare "sn" stays unread: "SN_12345" is a serial number (test_mic_filename_roles).
+_MIC_CODE_RE = re.compile(
+    r"(?:\d+ )?(?:(ki|ko|kin|kout|k)|(snt|snb|snm|sns)|(t(?=\d)|tt)|(ft)|(ohl|ohr|oh)"
+    r"|(rooml|roomr|rml|rmr)|(hh|hhat))\d?(?: (?:\d+|l|r))*")
+_MIC_CODE_ROLE = ("kick", "snare", "toms", "toms", "overheads", "room", "hats")
+_PART_CODES: tuple[tuple[str, str], ...] = (
+    (r"ag", "guitar_acoustic"), (r"pn|pno", "piano"),
+    # a unison stack of voices ("unisL" / "unisR")
+    (r"unis[lr]?", "backing_vocal"),
+    (r"ukelele|uke", "guitar_acoustic"),  # the common misspelling of "ukulele"
+)
+_PART_CODE_RES = tuple((re.compile(rf"(?:\d+ )?(?:{w})\d?(?![a-z])"), role) for w, role in _PART_CODES)
+
+
 def _keyword_role(name: str) -> str | None:
+    role = _keyword_role_before_r131(name)
+    base = os.path.splitext(name)[0].lower()
+    if role is None and "." in base:
+        # second reading with the dot as a separator
+        return _keyword_role(base.replace(".", " ") + ".wav")
+    key = " ".join(base.replace("_", " ").replace("-", " ").split())
+    if role == "lead_vocal":
+        # "Vocal Harmonies" counts too: the table knows "harmony", not its plural
+        behind = (any(_whole_word(w, key) for w in _BEHIND_WORDS) or _BEHIND_GLUED_RE.search(key)
+                  or _HARMONY_RE.search(key))
+        if behind and not _SAYS_LEAD_RE.search(key):
+            return "backing_vocal"
+    elif role == "backing_vocal":
+        if _HARMONY_RE.search(key):
+            other = _keyword_role_before_r131(_HARMONY_RE.sub(" ", base) + ".wav")
+            if other is not None and other not in VOCAL_ROLES:
+                return other
+    elif role is None:
+        code = _MIC_CODE_RE.fullmatch(key)
+        if code:
+            return _MIC_CODE_ROLE[code.lastindex - 1]
+        for pattern, part_role in _PART_CODE_RES:
+            if pattern.match(key):
+                return part_role
+    return role
+
+
+def _keyword_role_before_r131(name: str) -> str | None:
     key = os.path.splitext(name)[0].lower().replace("_", " ").replace("-", " ")
     key = " ".join(key.split())
     for words, role in _KEYWORDS_ZH:
