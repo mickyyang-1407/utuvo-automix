@@ -77,7 +77,8 @@ PROTECTED_VALUES = {
 }
 
 #: the fields a protected member must not carry at all
-PROTECTED_ABSENT = ("ride", "comp", "deess", "dynamic_eq", "level_match")
+#: (R132: a ride's band-following receipt goes with the ride)
+PROTECTED_ABSENT = ("ride", "ride_follow", "comp", "deess", "dynamic_eq", "level_match")
 
 #: the boundary, written where a reader (and the user) will actually see it
 BOUNDARY = (

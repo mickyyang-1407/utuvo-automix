@@ -8,6 +8,7 @@ can hand-edit a plan and re-render without touching code.
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import numbers
@@ -397,6 +398,22 @@ RIDE_ROLES = frozenset(
 #: how far the ride may move a stem, and how slowly
 RIDE_MAX_DB = 2.5
 RIDE_SMOOTH_S = 3.0
+
+#: R132: rides follow the band's sections instead of holding every stem at its
+#: own median.  Riding a guitar down in the chorus because the guitar got
+#: louder with everyone else took the build out of the arrangement: knocking
+#: the rides out of finished plans gave back 0.5-1.0 dB of the loudness range
+#: (3 s windows, p95 - p10), the single largest loss before the master.  The
+#: target now holds the stem at its usual distance from the rest of the band
+#: as planned at static gains (every other stem at its planned static gain,
+#: before the other stems' own rides, which can move it by up to the ride
+#: cap), weighted RIDE_FOLLOW_K
+#: against the old own-median target: a stem that rises with the band is left
+#: alone, a stem that drops out of step with the band is still brought back.
+#: Plans record ``ride_follow`` (receipt, not read by the renderer); the
+#: renderer only ever reads the ride points, so older plans replay unchanged.
+RIDE_FOLLOW_LAW = "band_follow_v1"
+RIDE_FOLLOW_K = 1.0
 
 #: sibilance index above which a vocal gets a de-esser, and how hard
 DEESS_THRESHOLD = 0.03
@@ -834,8 +851,111 @@ def _simplify(times: np.ndarray, gains: np.ndarray, tol: float = 0.2) -> list[li
     return out
 
 
-def _ride_curve(stem, max_db: float) -> list[list[float]]:
+def _stem_levels(stem) -> tuple[np.ndarray, np.ndarray]:
+    """A stem's 1 s / 0.25 s short-term level (window centres in seconds, dB).
+
+    R132: what a ride reads, made finite: NaN or infinite samples (a broken
+    file) count as silence, and nothing is louder than +300 dB, so a
+    power sum can never overflow into a contour that is all NaN.
+    """
+    times, db = dsp.short_term_db(stem.audio, stem.sr, 1.0, 0.25)
+    if not np.all(np.isfinite(db)):
+        # one bad sample poisons every window after it (prefix sums): read
+        # the file again with its non-finite samples as silence
+        times, db = dsp.short_term_db(np.nan_to_num(stem.audio, nan=0.0, posinf=0.0, neginf=0.0),
+                                      stem.sr, 1.0, 0.25)
+    db = np.nan_to_num(np.asarray(db, dtype=np.float64), nan=-300.0, posinf=300.0, neginf=-300.0)
+    return np.asarray(times, dtype=np.float64), np.clip(db, -300.0, 300.0)
+
+
+def _rest_level(levels: list, own: int, gains: list) -> np.ndarray | None:
+    """Everything but stem ``own``, at the planned gains, on ``own``'s own frames (dB).
+
+    ``levels`` holds each stem's (times, dB) and ``gains`` its final static
+    gain.  The other stems are read at ``own``'s window centres by time, so
+    stems at different sample rates or of different lengths line up; past the
+    end of a file a stem contributes nothing.  Frames where the rest is more
+    than 40 dB under its loudest (a breakdown to the stem alone, an intro, the
+    tail) are NaN: there is no band there to follow.  ``None`` when there is no
+    other stem or the rest never rises above -120 dB.
+    """
+    times = levels[own][0]
+    power = np.zeros(times.size)
+    others = 0
+    for i, (t, db) in enumerate(levels):
+        if i == own:
+            continue
+        p = 10.0 ** (np.clip(db + float(gains[i]), -300.0, 300.0) / 10.0)
+        power += np.interp(times, t, p, left=0.0, right=0.0) if t.size > 1 else np.where(
+            np.abs(times - t[0]) <= 0.5, p[0], 0.0)
+        others += 1
+    if not others:
+        return None
+    rest = 10.0 * np.log10(np.maximum(power, 1e-30))
+    top = float(np.max(rest))
+    if not np.isfinite(top) or top < -120.0:  # digital silence, not a band
+        return None
+    return np.where(rest > top - 40.0, rest, np.nan)
+
+
+def _follow_band(stems, tracks, *, groups, pans, source_facts, intensity: float) -> None:
+    """R132 (RIDE_FOLLOW_LAW): re-plan every planned ride to follow the band.
+
+    Runs after every gain decision (manual trims, the backing-vocal hierarchy
+    and stack ceiling) and before the lead vocal's compressor is fitted on the
+    ride.  The band is every other stem at the gain the renderer will use;
+    a declared capture group's members are weighed at their protected gain
+    (the protection itself runs later and strips their own rides).
+    """
+    if RIDE_FOLLOW_K <= 0.0 or not any(t.get("ride") for t in tracks):
+        return
+    gains = [float(t["gain_db"]) for t in tracks]
+    grouped = set()
+    if groups:
+        trial = copy.deepcopy(tracks)
+        try:
+            capmod.apply_protection(trial, copy.deepcopy(groups), pans=dict(pans or {}),
+                                    max_gain_db=MAX_STAGE_DB, source_facts=copy.deepcopy(source_facts))
+            gains = [float(t["gain_db"]) for t in trial]
+            grouped = {m for g in groups for m in g["members"]}
+        except capmod.CaptureGroupError:
+            pass  # the real protection below raises the same error for the user
+    levels = [_stem_levels(st) for st in stems]
+    for i, (st, t) in enumerate(zip(stems, tracks)):
+        if not t.get("ride") or t["id"] in grouped:
+            continue
+        own_t, own_db = levels[i]
+        rest = _rest_level(levels, i, gains)
+        info: dict = {}
+        ride = _ride_curve(st, RIDE_MAX_DB * intensity, rest, RIDE_FOLLOW_K, info=info,
+                           levels=(own_t, own_db))
+        if not info.get("followed"):
+            continue
+        old = t["ride"]
+        old_line = (f"ride ±{RIDE_MAX_DB * intensity:.1f} dB over {len(old)} points "
+                    f"(spread {max(g for _, g in old) - min(g for _, g in old):.1f} dB)")
+        t["evidence"] = [e for e in t["evidence"] if e != old_line]
+        if not ride:  # (a followed curve always has points; kept for safety)
+            t.pop("ride")
+            continue
+        t["ride"] = ride
+        t["ride_follow"] = {"law": RIDE_FOLLOW_LAW, "follow": RIDE_FOLLOW_K}
+        t["evidence"].append(
+            f"ride ±{RIDE_MAX_DB * intensity:.1f} dB over {len(ride)} points "
+            f"(spread {max(g for _, g in ride) - min(g for _, g in ride):.1f} dB), "
+            "following the rest of the band")
+
+
+def _ride_curve(stem, max_db: float, rest: np.ndarray | None = None,
+                follow: float = 0.0, info: dict | None = None,
+                levels: tuple | None = None) -> list[list[float]]:
     """Slow gain automation that keeps a sustained source at its own median.
+
+    R132: with ``rest`` (the rest of the band's level per window, NaN where
+    there is no band) and ``follow`` > 0 the target instead holds the source
+    at its usual distance from the band, weighted ``follow`` against the own
+    median; ``info["followed"]`` is set when that happened.  ``levels`` passes
+    the source's own (times, dB) windows when the caller already has them.
 
     This is the "vocal ride" a mixer does by hand: the verse comes up, the
     chorus comes down, so the performance sits still in the mix instead of
@@ -848,7 +968,7 @@ def _ride_curve(stem, max_db: float) -> list[list[float]]:
     # a 1 s window and 3 s smoothing: rides follow sections, not vibrato or
     # tremolo.  At 0.4 s / 1 s a 7 Hz tremolo produced 681 points and the
     # "ride" was audibly pumping.
-    times, db = dsp.short_term_db(stem.audio, stem.sr, 1.0, 0.25)
+    times, db = levels if levels is not None else dsp.short_term_db(stem.audio, stem.sr, 1.0, 0.25)
     if times.size < 3:
         return []
 
@@ -857,6 +977,25 @@ def _ride_curve(stem, max_db: float) -> list[list[float]]:
     if active.size < 3:
         return []
     target = float(np.median(active))
+    if rest is not None and follow > 0.0:
+        # R132: follow the band.  The stem is held at its usual distance from
+        # the rest of the band (the median of stem - rest where both play),
+        # so it rises and falls with the sections.  Taking the two medians
+        # separately would not do: with a quiet verse and a loud chorus each
+        # median can land in a different section.  A stem that never plays
+        # with the band keeps its own median, as before.
+        r = np.full(db.size, np.nan)
+        m = min(db.size, rest.size)
+        r[:m] = rest[:m]
+        r[~np.isfinite(r)] = np.nan
+        both = (db > loudest - 40.0) & ~np.isnan(r)
+        if both.any():
+            band = r + float(np.median(db[both] - r[both]))
+            # where the band has dropped out (a breakdown, a solo, past the end
+            # of the other files) the stem is left where the arrangement put it
+            target = np.where(np.isnan(r), db, (1.0 - float(follow)) * target + float(follow) * band)
+            if info is not None:
+                info["followed"] = True
 
     # deadband: a 1-2 dB swell inside a phrase is the performance, not a
     # balance problem.  Only move when the stem is clearly off its own median.
@@ -2086,6 +2225,11 @@ def build_plan(
                 )
 
     _backing_stack_ceiling(stems, tracks, grouped_ids, trims)
+
+    # R132 (RIDE_FOLLOW_LAW): the rides follow the band, now that every gain
+    # the band is weighed at is final
+    _follow_band(stems, tracks, groups=groups, pans=pans, source_facts=source_facts_by_id,
+                 intensity=intensity)
 
     # R130 (VOCAL_RANGE_FIT_LAW): each lead vocal's compressor, fitted on the
     # level path the renderer will really give it -- after the manual trims,

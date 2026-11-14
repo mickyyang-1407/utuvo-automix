@@ -251,7 +251,16 @@ def _duplicate_pairs(plan: dict) -> set:
 
 # -------------------------------------------------- the numbers are R25's
 
-def test_the_plan_without_a_group_is_the_r25_plan():
+@pytest.fixture
+def r25_rides(monkeypatch):
+    """R132 re-plans every ride to follow the band (RIDE_FOLLOW_LAW); R25's
+    rides held each stem at its own median.  The ride points are the plan's
+    own numbers (nothing in the plan says how they were derived), so the R25
+    comparison turns the band-following pass off instead of undoing it."""
+    monkeypatch.setattr(planner, "RIDE_FOLLOW_K", 0.0)
+
+
+def test_the_plan_without_a_group_is_the_r25_plan(r25_rides):
     plan, _, _ = _mix(_baseline_stems())
     plan = _without_ratio_law(plan)
     r25 = _r25("none")
@@ -265,14 +274,14 @@ def test_the_plan_without_a_group_is_the_r25_plan():
     assert mine == theirs
 
 
-def test_the_grouped_plan_keeps_the_r25_numbers():
+def test_the_grouped_plan_keeps_the_r25_numbers(r25_rides):
     plan, _, _ = _mix(_baseline_stems(), capture_groups=GROUPS)
     plan = _without_ratio_law(plan)
     r25 = _r25("group")
     assert _executable(plan) == _executable(r25)
 
 
-def test_the_manual_plan_keeps_the_r25_numbers():
+def test_the_manual_plan_keeps_the_r25_numbers(r25_rides):
     plan, _, _ = _mix(_baseline_stems(), capture_groups=GROUPS, **MANUAL)
     plan = _without_ratio_law(plan)
     r25 = _r25("manual")
@@ -287,7 +296,7 @@ def test_the_manual_plan_keeps_the_r25_numbers():
         ("manual", {"capture_groups": GROUPS, **MANUAL}),
     ],
 )
-def test_the_rendered_audio_is_the_r25_audio(tmp_path, case, options):
+def test_the_rendered_audio_is_the_r25_audio(tmp_path, case, options, r25_rides):
     # today's plan, compressed the R25 way, renders R25's audio to the bit
     plan, _, _ = _mix(_baseline_stems(), **options)
     rev = _preset().get("reverb") or {}

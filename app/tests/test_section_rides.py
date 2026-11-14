@@ -110,6 +110,13 @@ def test_forced_rides_are_written_validated_and_replay(monkeypatch):
     # the synthetic song passes on the adaptive limiter alone; a stricter gate
     # forces the ride path so it is exercised end to end
     monkeypatch.setattr(pipeline, "SECTION_RIDE_GATE_DB", -0.5)
+    # R132: the gate number below was found with rides that held every stem at
+    # its own median (the guitar wall ridden 2.5 dB down).  Band-following
+    # rides leave the wall where the arrangement put it, and at this forced
+    # -0.5 dB gate the section rides then stop at -0.84 (at the product gate,
+    # -3 dB, both land inside it: -2.79 / -2.89).  This test is about the
+    # section-ride path, so it plans the track rides the old way.
+    monkeypatch.setattr(planner, "RIDE_FOLLOW_K", 0.0)
     stems = _dense_song()
     p, audio, report = pipeline.mix(stems, planner.load_preset("heavy_rock_metal"), adaptive_release=True)
     moves = (p.get("music_automation") or {}).get("moves", [])
@@ -119,6 +126,26 @@ def test_forced_rides_are_written_validated_and_replay(monkeypatch):
         assert pipeline.SECTION_RIDE_FLOOR_DB <= m["trim_db"] < 0
         assert m["end_frame"] - m["start_frame"] > 2 * m["fade_frames"]
     assert report["limiter"]["gain_reduction_p95_db"] >= -0.5
+    assert abs(report["lufs"] - report["target_lufs"]) <= 1.0
+    planner.validate(p)
+    again, _ = render.render(stems, copy.deepcopy(p))
+    assert np.array_equal(np.asarray(again), np.asarray(audio))
+
+
+def test_forced_rides_reach_the_gate_with_band_following_rides(monkeypatch):
+    # R132: the same end-to-end path with the product ride law (rides follow
+    # the band, so the wall is no longer ridden down before the master).  A
+    # forced -1 dB gate still needs section rides, and they must still meet it.
+    monkeypatch.setattr(pipeline, "SECTION_RIDE_GATE_DB", -1.0)
+    assert planner.RIDE_FOLLOW_K > 0.0
+    stems = _dense_song()
+    p, audio, report = pipeline.mix(stems, planner.load_preset("heavy_rock_metal"), adaptive_release=True)
+    assert any(t.get("ride_follow") for t in p["tracks"]), "the product law must be the one planning the rides"
+    moves = (p.get("music_automation") or {}).get("moves", [])
+    assert moves, "the forced gate must produce section rides"
+    for m in moves:
+        assert pipeline.SECTION_RIDE_FLOOR_DB <= m["trim_db"] < 0
+    assert report["limiter"]["gain_reduction_p95_db"] >= -1.0
     assert abs(report["lufs"] - report["target_lufs"]) <= 1.0
     planner.validate(p)
     again, _ = render.render(stems, copy.deepcopy(p))
